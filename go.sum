@@ -1,0 +1,9 @@
+github.com/evanw/esbuild v0.28.2 h1:A2uETn4jrQTcXaT/shwTDTYBxDjl7fV7nXmUrJxfA2w=
+github.com/evanw/esbuild v0.28.2/go.mod h1:D2vIQZqV/vIf/VRHtViaUtViZmG7o+kKmlBfVQuRi48=
+github.com/klauspost/compress v1.20.4 h1:dD0v/bvxtjCBqQu6sx1TNWkalEY5lNTIe+HY9w8TeNI=
+github.com/klauspost/compress v1.20.4/go.mod h1:LUdAzn7YLVvxLpc7y3V1m40wESHTgc1422pwwBSKYuI=
+github.com/maxsupermanhd/wrpl-inspector/v3 v3.0.1-0.20261125213746-c0b433aa9dfd h1:Eiyfazct5zY09to6QTwhsOGMhHxKmk2Q8SaEhheMl9k=
+github.com/maxsupermanhd/wrpl-inspector/v3 v3.0.1-0.20261125213746-c0b433aa9dfd/go.mod h1:xAkEYEU4Sw9itlfd5GJ7+MzTZSDgf/WOK/yMH4OQ/D4=
+golang.org/x/sys v0.0.0-20220715151400-c0bba94af5f8/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
+golang.org/x/sys v0.40.0 h1:DBZZqJ2Rkml6QMQsZywtnjnnGvHza6BTfYFWY9kjEWQ=
+golang.org/x/sys v0.40.0/go.mod h1:OgkHotnGiDImocRcuBABYBEXf8A9a87e/uXjp9XT3ks=

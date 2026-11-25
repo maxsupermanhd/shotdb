@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>shotdb: shot results</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="bar">
+  <div class="bar-side bar-left">
+    <span class="brand">shotdb</span>
+    <button id="reopen" class="open-btn" hidden></button>
+    <button id="open" class="open-btn" title="The War Thunder install folder (with aces.vromfs.bin) or an unpacked datamine (with aces.vromfs.bin_u)">Open game folder</button>
+    <button id="forget" class="link-btn" title="Forget the remembered folder" hidden>Forget</button>
+    <input id="dir-input" type="file" webkitdirectory hidden>
+  </div>
+  <div class="picker">
+    <label for="shooter" class="picker-label">Shooter</label>
+    <input id="shooter" list="shooter-list" placeholder="Type a vehicle name" autocomplete="off" spellcheck="false">
+    <datalist id="shooter-list"></datalist>
+    <div id="shooter-info" class="shooter-info"></div>
+  </div>
+  <div class="bar-side bar-right">
+    <span id="data-status" class="data-status">No game data open</span>
+  </div>
+</header>
+<div class="subbar">
+  <div id="nations" class="nations"></div>
+  <div class="progress" title="Simulation queue, ordered outwards from the shooter's RB battle rating">
+    <div class="progress-track"><div id="progress-fill" class="progress-fill"></div></div>
+    <span id="progress-text" class="progress-text"></span>
+  </div>
+  <div class="legend">
+    <span class="legend-scale"></span>
+    <span>no pen</span><span class="legend-arrow">&rarr;</span><span>kills</span>
+    <span class="legend-pending">queued</span>
+  </div>
+</div>
+<main class="trees"><div id="trees" class="trees-grid"></div></main>
+<div id="tooltip" class="tooltip" hidden></div>
+<script type="module" src="./src/app.ts"></script>
+</body>
+</html>
