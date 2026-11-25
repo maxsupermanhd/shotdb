@@ -63,8 +63,9 @@ access to that folder:
 
 **Choose another** picks a different folder. **Forget** removes the remembered folder.
 
-The page needs the File System Access API (`showDirectoryPicker`), so use a Chromium browser.
-Firefox and Safari do not have it.
+Firefox has no `showDirectoryPicker`. There, drag the install folder from the file manager
+onto the page. The page reads single files from the dropped folder, with no upload. It cannot
+remember the folder, so drop it on each visit. A datamine tree does not work this way.
 
 Then pick the shooter in the box at the top, or click a card. Shots run from the shooter's RB
 battle rating outwards, up and down. Hover a card for the details.

@@ -202,8 +202,23 @@ let saved: FileSystemDirectoryHandle | null = null; // the remembered folder
 
 function setupOpen() {
   if (!window.showDirectoryPicker) {
-    $<HTMLButtonElement>("#open").disabled = true;
-    return setStatus("This browser has no File System Access API. Use a Chromium browser.", true);
+    // Firefox: only a dropped folder gives file access without an upload
+    $("#open").hidden = true;
+    addEventListener("dragover", (e) => e.preventDefault());
+    addEventListener("drop", async (e) => {
+      e.preventDefault();
+      const entry = e.dataTransfer?.items[0]?.webkitGetAsEntry();
+      if (!entry?.isDirectory) return setStatus("Drop the War Thunder install folder", true);
+      let files: Map<string, File>;
+      try {
+        setStatus(`Reading ${entry.name}…`);
+        files = await installFiles(entry as FileSystemDirectoryEntry);
+      } catch (err) {
+        return setStatus(`Cannot read ${entry.name}: ${message(err)}`, true);
+      }
+      await openSource({ kind: "files", files }, entry.name);
+    });
+    return setStatus("Drop the War Thunder install folder on this page. This browser cannot remember it.");
   }
   $("#open").addEventListener("click", async () => {
     let handle: FileSystemDirectoryHandle;
@@ -230,6 +245,35 @@ function setupOpen() {
   });
   $("#forget").addEventListener("click", () => remember(null));
   restore();
+}
+
+// The files of an install that the simulation reads. A File reads nothing until asked.
+async function installFiles(root: FileSystemDirectoryEntry) {
+  const files = new Map<string, File>();
+  const add = async (path: string, entry: FileSystemEntry) => {
+    files.set(path, await new Promise<File>((ok, fail) => (entry as FileSystemFileEntry).file(ok, fail)));
+  };
+  const child = (path: string, dir: boolean) => new Promise<FileSystemEntry | null>((ok, fail) => {
+    const done = (err: DOMException) => (err.name === "NotFoundError" ? ok(null) : fail(err));
+    if (dir) root.getDirectory(path, {}, ok, done);
+    else root.getFile(path, {}, ok, done);
+  });
+  for (const path of ["aces.vromfs.bin", "char.vromfs.bin", "lang.vromfs.bin", "warthunder.yup"]) {
+    const entry = await child(path, false);
+    if (entry) await add(path, entry);
+  }
+  const tanks = "content/base/res/tanks";
+  const dir = await child(tanks, true);
+  if (dir) {
+    const reader = (dir as FileSystemDirectoryEntry).createReader();
+    // readEntries gives one batch per call and an empty batch at the end
+    for (;;) {
+      const batch = await new Promise<FileSystemEntry[]>((ok, fail) => reader.readEntries(ok, fail));
+      if (!batch.length) break;
+      await Promise.all(batch.filter((e) => e.isFile && e.name.endsWith(".grp")).map((e) => add(`${tanks}/${e.name}`, e)));
+    }
+  }
+  return files;
 }
 
 async function restore() {

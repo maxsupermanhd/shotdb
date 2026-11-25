@@ -78,7 +78,9 @@ export interface SimError {
 
 export type TargetResult = SimResult | SimError;
 
-export type Source = { kind: "handle"; handle: FileSystemDirectoryHandle };
+export type Source =
+  | { kind: "handle"; handle: FileSystemDirectoryHandle }
+  | { kind: "files"; files: Map<string, File> };
 
 export type Request =
   | { id: number; op: "open"; source: Source }

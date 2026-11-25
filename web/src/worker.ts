@@ -19,6 +19,7 @@ function missing(err: unknown): boolean {
 
 async function fileOf(path: string): Promise<File | null> {
   if (!source) return null;
+  if (source.kind === "files") return source.files.get(path) ?? null;
   const parts = path.split("/");
   const name = parts.pop()!;
   try {
@@ -56,6 +57,12 @@ async function readRange(path: string, offset: number, length: number): Promise<
 
 async function listDir(path: string): Promise<string[] | null> {
   if (!source) return null;
+  if (source.kind === "files") {
+    const prefix = path + "/";
+    return [...source.files.keys()]
+      .filter((k) => k.startsWith(prefix) && !k.slice(prefix.length).includes("/"))
+      .map((k) => k.slice(prefix.length));
+  }
   try {
     const dir = await dirOf(source.handle, path.split("/"));
     const names: string[] = [];
