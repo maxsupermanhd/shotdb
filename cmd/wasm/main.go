@@ -3,7 +3,8 @@
 // Command wasm exposes the shot simulation to JavaScript as globalThis.shotdb:
 //
 //	shotdb.open(readFile, readRange, listDir) -> Promise<string>  JSON {source, version, units, trees}
-//	shotdb.simulate(shooter, target)          -> Promise<string>  JSON sim.Result
+//	shotdb.rounds(shooter)                    -> Promise<string>  JSON {range, rounds: []sim.ShellInfo}
+//	shotdb.simulate(shooter, target, round)   -> Promise<string>  JSON sim.Result; round -1 for the best
 //
 // readFile(path) and readRange(path, offset, length) must return a Promise of
 // a Uint8Array, listDir(path) a Promise of an array of file names; each gives
@@ -49,16 +50,33 @@ func main() {
 			return string(out), err
 		})
 	}))
-	api.Set("simulate", js.FuncOf(func(_ js.Value, args []js.Value) any {
-		if len(args) != 2 {
-			return reject(errors.New("simulate needs a shooter and a target"))
+	api.Set("rounds", js.FuncOf(func(_ js.Value, args []js.Value) any {
+		if len(args) != 1 {
+			return reject(errors.New("rounds needs a shooter"))
 		}
-		shooter, target := args[0].String(), args[1].String()
+		shooter := args[0].String()
 		return promise(func() (any, error) {
 			if simulator == nil {
 				return "", errors.New("no game data open")
 			}
-			r, err := simulator.Simulate(shooter, target)
+			rounds, err := simulator.Rounds(shooter)
+			if err != nil {
+				return "", err
+			}
+			out, err := json.Marshal(map[string]any{"range": sim.Range, "rounds": rounds})
+			return string(out), err
+		})
+	}))
+	api.Set("simulate", js.FuncOf(func(_ js.Value, args []js.Value) any {
+		if len(args) != 3 || args[2].Type() != js.TypeNumber {
+			return reject(errors.New("simulate needs a shooter, a target and a round"))
+		}
+		shooter, target, round := args[0].String(), args[1].String(), args[2].Int()
+		return promise(func() (any, error) {
+			if simulator == nil {
+				return "", errors.New("no game data open")
+			}
+			r, err := simulator.Simulate(shooter, target, round)
 			if err != nil {
 				return "", err
 			}

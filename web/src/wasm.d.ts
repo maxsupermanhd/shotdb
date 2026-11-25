@@ -13,6 +13,8 @@ type ListDir = (path: string) => Promise<string[] | null>;
 declare var shotdb: {
   // JSON of a GameInfo
   open(readFile: ReadFile, readRange: ReadRange, listDir: ListDir): Promise<string>;
-  // JSON of a SimResult
-  simulate(shooter: string, target: string): Promise<string>;
+  // JSON of a Rounds
+  rounds(shooter: string): Promise<string>;
+  // JSON of a SimResult; round -1 fires every round and keeps the best
+  simulate(shooter: string, target: string, round: number): Promise<string>;
 };

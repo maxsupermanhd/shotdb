@@ -27,13 +27,13 @@ body {
 }
 
 .bar {
-  display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 16px;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 16px;
   padding: 10px 16px;
   background: var(--panel);
   border-bottom: 1px solid var(--line);
 }
+.bar-left { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .bar-side { display: flex; align-items: center; gap: 10px; }
-.bar-right { justify-content: flex-end; }
 .brand { font-weight: 700; letter-spacing: .02em; font-size: 15px; }
 .open-btn {
   font: inherit; font-size: 12px; cursor: pointer;
@@ -46,7 +46,7 @@ body {
   color: var(--muted); background: none; border: 0; padding: 0; text-decoration: underline;
 }
 .data-status {
-  max-width: 34vw; font-size: 12px; color: var(--muted);
+  font-size: 12px; color: var(--muted);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .data-status.error { color: var(--nonpen); }
@@ -62,6 +62,29 @@ body {
 }
 #shooter:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .shooter-info { font-size: 12px; color: var(--muted); }
+
+.rounds { justify-self: end; min-width: 0; max-width: 100%; font-size: 11px; }
+.rounds-head { color: var(--muted); margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rounds-head b { color: var(--text); font-weight: 600; }
+.rounds-list { max-height: 90px; overflow: auto; }
+.rounds table { border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.rounds th { font-weight: 400; color: var(--muted); text-align: right; padding: 0 5px; white-space: nowrap; }
+.rounds th.gun { text-align: left; color: var(--text); padding-top: 2px; }
+.rounds td { padding: 1px 5px; text-align: right; white-space: nowrap; }
+.rounds td:first-child { text-align: left; max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
+.round { cursor: pointer; }
+.round:hover td { background: #222932; }
+.round.hl td { background: rgb(240 194 75 / .22); }
+.round.hl td:first-child { box-shadow: inset 2px 0 var(--accent); }
+.rounds.forced .round:not(.forced) { opacity: .4; }
+.round.forced td:first-child { color: var(--accent); }
+.r-wins { color: var(--accent); }
+
+/* narrow: the rounds go under the picker, over the full width */
+@media (max-width: 1240px) {
+  .bar { grid-template-columns: minmax(0, 1fr) auto; }
+  .rounds { grid-column: 1 / -1; justify-self: stretch; }
+}
 
 .subbar {
   display: flex; align-items: center; gap: 20px; flex-wrap: wrap;
@@ -80,6 +103,9 @@ body {
 .progress-track { flex: 1; max-width: 320px; height: 6px; background: var(--pending); border-radius: 3px; overflow: hidden; }
 .progress-fill { height: 100%; width: 0; background: var(--accent); }
 .progress-text { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.workers { color: var(--muted); font-size: 12px; }
+.workers select { font: inherit; color: var(--text); background: var(--page); border: 1px solid var(--line); border-radius: 4px; }
 
 .legend { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
 .legend-scale {
@@ -118,14 +144,14 @@ body {
 .rank-body { display: flex; gap: 10px; align-items: flex-start; }
 .grid { border-collapse: separate; border-spacing: 4px; margin: -4px; }
 .grid.premium { border-left: 1px dashed var(--line); padding-left: 6px; }
-.grid td { width: 128px; height: 40px; padding: 0; vertical-align: top; }
+.grid td { width: 92px; height: 64px; padding: 0; vertical-align: top; }
 
 .card {
   --bg: var(--pending);
   position: relative;
   display: block;
-  width: 128px; height: 40px;
-  padding: 4px 6px 0 44px;
+  width: 92px; height: 64px;
+  padding: 2px 4px 0;
   border-radius: 4px;
   background: var(--bg);
   border: 1px solid rgb(255 255 255 / .06);
@@ -146,23 +172,28 @@ body {
 .card.shooter { outline: 2px solid var(--accent); outline-offset: 1px; }
 .card.shooter::after {
   content: "shooter";
-  position: absolute; top: 0; right: 0;
-  padding: 0 4px; font-size: 9px; font-weight: 700; text-transform: uppercase;
-  color: #111; background: var(--accent); border-bottom-left-radius: 3px;
+  position: absolute; top: 29px; right: 0;
+  padding: 0 3px; font-size: 8px; font-weight: 700; text-transform: uppercase;
+  color: #111; background: var(--accent); border-radius: 2px 0 0 2px;
 }
 /* the install's unit pictures are 2:1 with wide margins; cover crops the margins */
 .card-icon {
-  position: absolute; left: 2px; top: 2px;
-  width: 40px; height: 34px; object-fit: cover;
+  position: absolute; left: 2px; bottom: 5px;
+  width: 58px; height: 30px; object-fit: cover;
   filter: drop-shadow(0 1px 1px rgb(0 0 0 / .6));
 }
+/* two lines at most, then an ellipsis */
 .card-name {
-  display: block;
-  font-size: 12px; font-weight: 600;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2;
+  overflow: hidden; overflow-wrap: anywhere;
+  font-size: 11px; line-height: 12px; font-weight: 600;
   text-shadow: 0 1px 1px rgb(0 0 0 / .5);
 }
-.card-br { display: block; font-size: 11px; color: rgb(255 255 255 / .7); font-variant-numeric: tabular-nums; }
+.card-br {
+  position: absolute; right: 4px; bottom: 5px;
+  font-size: 11px; color: rgb(255 255 255 / .75); font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 1px rgb(0 0 0 / .6);
+}
 .card-views { position: absolute; left: 0; right: 0; bottom: 0; display: flex; height: 3px; gap: 1px; }
 .card-views i { flex: 1; }
 

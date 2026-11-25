@@ -4,6 +4,7 @@
 package sim
 
 import (
+	"fmt"
 	"hash/fnv"
 	"math"
 	"math/rand/v2"
@@ -15,9 +16,11 @@ import (
 	"shotdb/geom"
 )
 
-// Simulator gives the result of a shooter against a target.
+// Simulator gives the result of a shooter against a target. With round -1 it
+// fires every round of the shooter and keeps the best, else only that round.
 type Simulator interface {
-	Simulate(shooter, target string) (Result, error)
+	Simulate(shooter, target string, round int) (Result, error)
+	Rounds(shooter string) ([]ShellInfo, error)
 }
 
 const Range = 500.0 // m
@@ -54,10 +57,18 @@ type Result struct {
 	Shots   int          `json:"shots"` // shots simulated, all shells
 }
 
+// ShellInfo is a round of the shooter. Index is its place in Rounds.
 type ShellInfo struct {
-	Name  string  `json:"name"`
-	Type  string  `json:"type"`
-	PenMm float64 `json:"pen"` // flat penetration at Range
+	Index     int     `json:"index"`
+	Name      string  `json:"name"`
+	Gun       string  `json:"gun"`
+	Type      string  `json:"type"`
+	CaliberMm float64 `json:"caliber"`
+	MassKg    float64 `json:"mass"`
+	Speed     float64 `json:"speed"` // m/s at the muzzle
+	PenMm     float64 `json:"pen"`   // flat penetration at Range
+	FillerKg  float64 `json:"filler"`
+	Explosive string  `json:"explosive"`
 }
 
 type ViewResult struct {
@@ -107,7 +118,38 @@ func (s *Sim) target(v *game.Vehicle) (*target, error) {
 	return t, nil
 }
 
-func (s *Sim) Simulate(shooter, target string) (Result, error) {
+func (s *Sim) Rounds(shooter string) ([]ShellInfo, error) {
+	a, err := s.Data.Vehicle(shooter)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ShellInfo, len(a.Shells))
+	for k := range a.Shells {
+		out[k] = newShell(s.Data, &a.Shells[k]).info(k)
+	}
+	return out, nil
+}
+
+func newShell(d *game.Data, g *game.Shell) *shell {
+	sh := &shell{Shell: g, speed: impactSpeed(g, Range)}
+	sh.body = kineticPen(d, g, sh.speed, Range)
+	sh.pen = sh.body
+	if g.Cumulative > 0 {
+		sh.pen = g.Cumulative
+	}
+	return sh
+}
+
+func (sh *shell) info(index int) ShellInfo {
+	g := sh.Shell
+	return ShellInfo{
+		Index: index, Name: g.Label, Gun: g.Gun, Type: g.Type,
+		CaliberMm: math.Round(g.Caliber*10000) / 10, MassKg: math.Round(g.Mass*1000) / 1000, Speed: math.Round(g.Speed),
+		PenMm: math.Round(sh.pen*10) / 10, FillerKg: math.Round(g.ExplMass*10000) / 10000, Explosive: g.ExplType,
+	}
+}
+
+func (s *Sim) Simulate(shooter, target string, round int) (Result, error) {
 	start := time.Now()
 	a, err := s.Data.Vehicle(shooter)
 	if err != nil {
@@ -124,8 +166,14 @@ func (s *Sim) Simulate(shooter, target string) (Result, error) {
 	best := Result{}
 	bestPen := -1.0
 	shots := 0
+	if round >= len(a.Shells) {
+		return Result{}, fmt.Errorf("%s has no round %d", shooter, round)
+	}
 	for k := range a.Shells {
-		r := s.shoot(&a.Shells[k], t)
+		if round >= 0 && k != round {
+			continue
+		}
+		r := s.shoot(k, &a.Shells[k], t)
 		shots += r.Shots
 		if best.Shell == nil || r.Score > best.Score || (r.Score == best.Score && r.Shell.PenMm > bestPen) {
 			best, bestPen = r, r.Shell.PenMm
@@ -142,21 +190,17 @@ func (s *Sim) Simulate(shooter, target string) (Result, error) {
 }
 
 // shoot fires one shell along every shot line of every view.
-func (s *Sim) shoot(g *game.Shell, t *target) Result {
+func (s *Sim) shoot(index int, g *game.Shell, t *target) Result {
 	d := s.Data
-	sh := &shell{Shell: g, speed: impactSpeed(g, Range)}
-	sh.body = kineticPen(d, g, sh.speed, Range)
-	sh.pen = sh.body
-	if g.Cumulative > 0 {
-		sh.pen = g.Cumulative
-	}
+	sh := newShell(d, g)
 	h := fnv.New64a()
 	h.Write([]byte(g.Name + "/" + g.Type + "/" + t.v.ID))
 	seed := h.Sum64()
 
 	var hits []geom.Hit
 	var leaf []span
-	r := Result{Shell: &ShellInfo{Name: g.Label, Type: g.Type, PenMm: math.Round(sh.pen*10) / 10}}
+	info := sh.info(index)
+	r := Result{Shell: &info}
 	for vi, view := range Views {
 		vr := ViewResult{Name: view.Name, Counts: map[Outcome]int{}}
 		first := map[int32]*PlateInfo{}

@@ -55,10 +55,23 @@ export interface View {
   plates: Plate[];
 }
 
+// A round of the shooter; index is its place in Rounds.rounds.
 export interface Shell {
+  index: number;
   name: string;
+  gun: string;
   type: string;
-  pen: number;
+  caliber: number; // mm
+  mass: number; // kg
+  speed: number; // m/s at the muzzle
+  pen: number; // mm flat at the range
+  filler: number; // kg, 0 if none
+  explosive: string;
+}
+
+export interface Rounds {
+  range: number; // m
+  rounds: Shell[];
 }
 
 export interface SimResult {
@@ -84,11 +97,13 @@ export type Source =
 
 export type Request =
   | { id: number; op: "open"; source: Source }
-  | { id: number; op: "sim"; shooter: string; targets: string[] };
+  | { id: number; op: "rounds"; shooter: string }
+  | { id: number; op: "sim"; shooter: string; targets: string[]; round: number }; // round -1: the best
 
 export interface Replies {
   open: { info: GameInfo };
+  rounds: { rounds: Rounds };
   sim: { results: TargetResult[] };
 }
 
-export type Reply = { id: number } & ({ error: string } | Replies["open"] | Replies["sim"]);
+export type Reply = { id: number } & ({ error: string } | Replies["open"] | Replies["rounds"] | Replies["sim"]);

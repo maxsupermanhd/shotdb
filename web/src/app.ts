@@ -1,5 +1,5 @@
-// Tech trees and names from the opened game data, unit icons from the wiki's static content; shot results from the Go simulation (shotdb.wasm) in a worker.
-import type { Card, Grid, Outcome, Plate, Replies, Reply, Request, Source, TargetResult, Tree, Unit } from "./types";
+// Tech trees and names from the opened game data, unit icons from the wiki's static content; shot results from the Go simulation (shotdb.wasm) in a pool of workers.
+import type { Card, Grid, Outcome, Plate, Replies, Reply, Request, Rounds, Source, TargetResult, Tree, Unit } from "./types";
 
 const RANKS = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"];
 const OUTCOMES: Outcome[] = ["kill", "pen", "shatter", "ricochet", "nonpen"];
@@ -13,8 +13,12 @@ const state = {
   speed: Number(params.get("speed") ?? 8), // targets per worker call
   game: new Map<string, Unit>(), // from the opened game data
   results: new Map<string, TargetResult>(),
+  rounds: null as Rounds | null, // of the shooter
+  round: -1, // the only round to fire, or -1 for the best of all
+  wins: [] as number[], // targets per round that the round was best on
   queue: [] as string[],
   done: 0,
+  next: 0, // queue index of the next batch to give to a worker
   ms: 0, // simulation time of the done pairs
   gen: 0, // bumps on every queue restart; stale worker replies are dropped
   byLabel: new Map<string, string>(),
@@ -28,20 +32,23 @@ const message = (err: unknown) => (err instanceof Error ? err.message : String(e
 type Body<R> = R extends unknown ? Omit<R, "id"> : never;
 type Call = { resolve: (r: Replies[keyof Replies]) => void; reject: (e: Error) => void };
 
-const worker = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
-const calls = new Map<number, Call>();
-let callId = 0;
-worker.onmessage = ({ data }: MessageEvent<Reply>) => {
-  const c = calls.get(data.id)!;
-  calls.delete(data.id);
-  "error" in data ? c.reject(new Error(data.error)) : c.resolve(data);
+// Each worker runs its own wasm with its own copy of the game data. They share one queue.
+type Peer = {
+  worker: Worker;
+  calls: Map<number, Call>;
+  opened: Promise<Replies["open"]> | null; // the open call for the current source
+  retire: boolean; // terminate after the call in flight
 };
-worker.onerror = (e) => setStatus(`Worker failed: ${e.message}`, true);
-const call = <K extends keyof Replies>(msg: Extract<Body<Request>, { op: K }>) => new Promise<Replies[K]>((resolve, reject) => {
+const pool: Peer[] = [];
+let source: Source | null = null; // the open game folder, for workers that start later
+let callId = 0;
+const call = <K extends keyof Replies>(peer: Peer, msg: Extract<Body<Request>, { op: K }>) => new Promise<Replies[K]>((resolve, reject) => {
   const id = ++callId;
-  calls.set(id, { resolve: resolve as Call["resolve"], reject });
-  worker.postMessage({ ...msg, id });
+  peer.calls.set(id, { resolve: resolve as Call["resolve"], reject });
+  peer.worker.postMessage({ ...msg, id });
 });
+const cores = navigator.hardwareConcurrency || 2;
+setupWorkers();
 
 let trees: Tree[] = [];
 const cards = new Map<string, HTMLElement[]>(); // unit id -> card elements
@@ -57,6 +64,41 @@ setupTrees();
 setupPicker();
 setupOpen();
 
+// Default: half of the cores, at most 8, as each worker keeps the game data and a mesh cache.
+function setupWorkers() {
+  const select = $<HTMLSelectElement>("#workers");
+  for (let n = 1; n <= cores; n++) select.add(new Option(String(n)));
+  const stored = Number(localStorage.getItem("shotdb.workers"));
+  select.value = String(stored >= 1 && stored <= cores ? stored : Math.min(8, Math.max(1, Math.floor(cores / 2))));
+  select.addEventListener("change", () => {
+    localStorage.setItem("shotdb.workers", select.value);
+    setWorkers(Number(select.value));
+  });
+  setWorkers(Number(select.value));
+}
+
+function setWorkers(n: number) {
+  while (pool.length > n) {
+    const peer = pool.pop()!;
+    peer.retire = true;
+    if (!peer.calls.size) peer.worker.terminate();
+  }
+  while (pool.length < n) {
+    const peer: Peer = { worker: new Worker(new URL("./worker.js", import.meta.url), { type: "module" }), calls: new Map(), opened: null, retire: false };
+    peer.worker.onmessage = ({ data }: MessageEvent<Reply>) => {
+      const c = peer.calls.get(data.id)!;
+      peer.calls.delete(data.id);
+      "error" in data ? c.reject(new Error(data.error)) : c.resolve(data);
+      if (peer.retire && !peer.calls.size) peer.worker.terminate();
+    };
+    peer.worker.onerror = (e) => setStatus(`Worker failed: ${e.message}`, true);
+    pool.push(peer);
+    if (!source) continue;
+    peer.opened = call(peer, { op: "open", source });
+    if (state.rounds && state.next < state.queue.length) drain(peer, state.gen);
+  }
+}
+
 function setupTrees() {
   const main = $("#trees");
   const tip = $("#tooltip");
@@ -68,12 +110,19 @@ function setupTrees() {
     const card = (e.target as Element).closest<HTMLElement>("[data-id]");
     if (card) showTooltip(card);
   });
-  main.addEventListener("mouseleave", () => (tip.hidden = true));
+  main.addEventListener("mouseleave", hideTip);
   main.parentElement!.addEventListener("scroll", () => {
-    if (!tip.classList.contains("pinned")) tip.hidden = true;
+    if (!tip.classList.contains("pinned")) hideTip();
   }, { passive: true });
   main.addEventListener("mouseout", (e) => {
-    if (!(e.relatedTarget instanceof Element && e.relatedTarget.closest("[data-id]"))) tip.hidden = true;
+    if (!(e.relatedTarget instanceof Element && e.relatedTarget.closest("[data-id]"))) hideTip();
+  });
+  $("#rounds").addEventListener("click", (e) => {
+    const row = (e.target as Element).closest<HTMLElement>(".round");
+    if (!row) return;
+    const i = Number(row.dataset.index);
+    state.round = state.round === i ? -1 : i;
+    restartQueue();
   });
   main.innerHTML = `<p class="empty">Open the War Thunder install folder to show the research trees.</p>`;
   $("#progress-text").textContent = "Open a game folder to run the shots";
@@ -342,12 +391,15 @@ function handleStore(op: "get" | "put" | "delete", handle?: FileSystemDirectoryH
   });
 }
 
-async function openSource(source: Source, label: string) {
+async function openSource(src: Source, label: string) {
   const open = $<HTMLButtonElement>("#open");
   open.disabled = true;
   setStatus(`Loading ${label}…`);
+  source = src;
+  state.gen++; // the running queue stops
+  for (const peer of pool) peer.opened = call(peer, { op: "open", source });
   try {
-    const { info } = await call({ op: "open", source });
+    const [{ info }] = await Promise.all(pool.map((p) => p.opened!));
     state.game = new Map(info.units.map((u) => [u.id, { ...u, name: clean(u.name) }]));
     trees = info.trees;
     render();
@@ -395,6 +447,7 @@ function shootable(id: string) {
 function selectShooter(id: string) {
   const pick = shootable(id) ? id : [...cards.keys()].find(shootable);
   if (!pick) return;
+  if (pick !== state.shooter) state.round = -1;
   state.shooter = pick;
   $<HTMLInputElement>("#shooter").value = pickerLabel(pick);
   shooterInfo();
@@ -417,7 +470,10 @@ async function restartQueue() {
   const gen = ++state.gen;
   state.results.clear();
   state.done = 0;
+  state.next = 0;
   state.ms = 0;
+  state.rounds = null;
+  roundsPanel();
   for (const els of cards.values()) {
     els.forEach((el) => {
       el.classList.remove("running", "done", "void");
@@ -431,27 +487,57 @@ async function restartQueue() {
     return Math.abs(da) - Math.abs(db) || db - da || a.localeCompare(b);
   });
   progress();
-  while (state.done < state.queue.length) {
-    const batch = state.queue.slice(state.done, state.done + state.speed);
+  try {
+    await pool[0].opened;
+    const { rounds } = await call(pool[0], { op: "rounds", shooter: state.shooter });
+    if (gen !== state.gen) return;
+    state.rounds = rounds;
+  } catch (err) {
+    if (gen === state.gen) $("#rounds").textContent = `Cannot read the rounds: ${message(err)}`;
+    return;
+  }
+  if (state.round >= state.rounds.rounds.length) state.round = -1;
+  state.wins = state.rounds.rounds.map(() => 0);
+  roundsPanel();
+  if (!state.rounds.rounds.length) shooterInfo("no gun of 20 mm or more that attacks armour");
+  pool.forEach((peer) => drain(peer, gen));
+}
+
+// drain gives the next batch of the queue to the worker until the queue is empty.
+async function drain(peer: Peer, gen: number) {
+  try {
+    await peer.opened;
+  } catch {
+    return; // openSource shows the error
+  }
+  while (gen === state.gen && !peer.retire && state.next < state.queue.length) {
+    const batch = state.queue.slice(state.next, state.next + state.speed);
+    state.next += batch.length;
     batch.forEach((id) => cards.get(id)!.forEach((el) => el.classList.add("running")));
     let results: TargetResult[];
     try {
-      ({ results } = await call({ op: "sim", shooter: state.shooter, targets: batch }));
+      ({ results } = await call(peer, { op: "sim", shooter: state.shooter, targets: batch, round: state.round }));
     } catch (err) {
-      if (gen === state.gen) $("#progress-text").textContent = `Stopped: ${message(err)}`;
+      if (gen === state.gen) {
+        state.next = state.queue.length;
+        $("#progress-text").textContent = `Stopped: ${message(err)}`;
+      }
       return;
     }
     if (gen !== state.gen) return;
-    const first = results[0];
-    if (state.done === 0 && first && !("error" in first) && !first.shell) shooterInfo("no gun of 20 mm or more that attacks armour");
     for (const r of results) {
       state.results.set(r.target, r);
-      if (!("error" in r)) state.ms += r.ms;
+      if ("error" in r) continue;
+      state.ms += r.ms;
+      if (r.shell) state.wins[r.shell.index]++;
     }
+    document.querySelectorAll<HTMLElement>("#rounds .r-wins").forEach((el, i) => (el.textContent = String(state.wins[i])));
     batch.forEach(paint);
     state.done += batch.length;
     progress();
   }
+  // a retired worker leaves its part of the queue to the others
+  if (gen !== state.gen || state.done < state.queue.length) return;
   const pin = params.get("hover");
   const pinned = pin ? cards.get(pin) : undefined;
   if (pinned) {
@@ -460,13 +546,51 @@ async function restartQueue() {
   }
 }
 
+// The shooter's rounds at the range: click one to fire only it, click it again for the best of all.
+function roundsPanel() {
+  const panel = $("#rounds");
+  const r = state.rounds;
+  panel.classList.toggle("forced", state.round >= 0);
+  if (!r) return panel.replaceChildren();
+  if (!r.rounds.length) {
+    panel.innerHTML = `<div class="rounds-head">No gun of 20 mm or more that attacks armour</div>`;
+    return;
+  }
+  // with one gun its name goes in the head, else above its rounds
+  const guns = new Set(r.rounds.map((s) => s.gun));
+  let gun = guns.size === 1 ? r.rounds[0].gun : "";
+  const head = (gun ? `<b>${esc(gun)}</b>: ` : "") + (state.round >= 0
+    ? `only <b>${esc(r.rounds[state.round].name)}</b> at ${r.range} m · click it again for the best of all`
+    : `${r.rounds.length} rounds at ${r.range} m, the best per target · click a round to fire only it`);
+  const rows = r.rounds.map((s, i) => {
+    const g = s.gun === gun ? "" : `<tr><th class="gun" colspan="8">${esc((gun = s.gun))}</th></tr>`;
+    const mass = s.mass >= 1 ? `${s.mass.toFixed(2)} kg` : `${Math.round(s.mass * 1000)} g`;
+    const filler = s.filler ? `${+(s.filler * 1000).toFixed(1)} g ${esc(s.explosive.replaceAll("_", " "))}` : "";
+    return g + `<tr class="round${i === state.round ? " forced" : ""}" data-index="${i}"><td title="${esc(s.name)}">${esc(s.name)}</td>`
+      + `<td>${shellType(s.type)}</td><td>${+s.caliber.toFixed(1)} mm</td><td>${mass}</td><td>${s.speed} m/s</td>`
+      + `<td>${Math.round(s.pen)} mm</td><td>${filler}</td><td class="r-wins">${state.wins[i] ?? 0}</td></tr>`;
+  }).join("");
+  panel.innerHTML = `<div class="rounds-head">${head}</div><div class="rounds-list"><table>`
+    + `<tr><th></th><th>type</th><th>calibre</th><th>mass</th><th>muzzle</th><th title="flat penetration at ${r.range} m">pen</th><th>filler</th><th title="targets this round was best on">best</th></tr>`
+    + rows + `</table></div>`;
+}
+
+function highlightRound(index: number) {
+  document.querySelectorAll<HTMLElement>("#rounds .round").forEach((el) => el.classList.toggle("hl", Number(el.dataset.index) === index));
+}
+
+function hideTip() {
+  $("#tooltip").hidden = true;
+  highlightRound(-1);
+}
+
 function progress() {
   const total = state.queue.length;
   $("#progress-fill").style.width = `${total ? (100 * state.done) / total : 0}%`;
-  const next = state.queue[state.done];
+  const next = state.queue[state.next];
   const avg = state.done ? ` · ${Math.round(state.ms / state.done)} ms a pair` : "";
-  $("#progress-text").textContent = next
-    ? `${state.done} / ${total} · now at BR ${br(next).toFixed(1)}${avg}`
+  $("#progress-text").textContent = state.done < total
+    ? `${state.done} / ${total}${next ? ` · now at BR ${br(next).toFixed(1)}` : ""}${avg}`
     : `${total} / ${total} done${avg}`;
 }
 
@@ -508,13 +632,15 @@ function showTooltip(el: HTMLElement, pinned = false) {
   if (!u) {
     body = `<div class="tt-pending">Not in the opened game data, not simulated</div>`;
   } else if (!res) {
-    body = `<div class="tt-pending">Queued: ${state.queue.indexOf(id) - state.done + 1} ahead in line</div>`;
+    body = `<div class="tt-pending">Queued: ${state.queue.indexOf(id) - state.next + 1} ahead in line</div>`;
   } else if ("error" in res) {
     body = `<div class="tt-pending">Failed: ${esc(res.error)}</div>`;
   } else if (!res.shell) {
     body = `<div class="tt-pending">The shooter has no gun of 20 mm or more that attacks armour</div>`;
   } else {
-    body = `<div class="tt-shell">${esc(res.shell.name)} <span class="muted">${shellType(res.shell.type)} · ${res.shell.pen} mm flat at 500 m</span></div>`
+    const n = state.rounds?.rounds.length ?? 0;
+    body = `<div class="tt-shell">${esc(res.shell.name)} <span class="muted">${shellType(res.shell.type)} · ${res.shell.pen} mm flat at ${state.rounds?.range ?? 500} m</span></div>`
+      + `<div class="tt-sub">${esc(res.shell.gun)} · ${state.round >= 0 ? "the only round fired" : `best of ${n} round${n === 1 ? "" : "s"}`}</div>`
       + res.views.map((v) => {
         const total = OUTCOMES.reduce((a, o) => a + (v.counts[o] ?? 0), 0);
         const bar = OUTCOMES.map((o) => v.counts[o] ? `<i class="o-${o}" style="flex:${v.counts[o]}"></i>` : "").join("");
@@ -532,6 +658,7 @@ function showTooltip(el: HTMLElement, pinned = false) {
     + `<div class="tt-shooter">shot by ${esc(name(state.shooter))}${id === state.shooter ? " (itself)" : ""}</div>`
     + body;
   tip.hidden = false;
+  highlightRound(res && !("error" in res) && res.shell ? res.shell.index : -1);
   const rect = el.getBoundingClientRect();
   const w = tip.offsetWidth, h = tip.offsetHeight;
   let x = rect.right + 8, y = rect.top;

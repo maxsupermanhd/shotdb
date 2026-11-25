@@ -70,6 +70,17 @@ remember the folder, so drop it on each visit. A datamine tree does not work thi
 Then pick the shooter in the box at the top, or click a card. Shots run from the shooter's RB
 battle rating outwards, up and down. Hover a card for the details.
 
+The panel at the top right shows the shooter's gun and each round that the simulation fires:
+type, calibre, mass, muzzle speed, flat penetration at 500 m and filler. The **best** column
+counts the targets on which each round gave the best score. When you hover a card, the panel
+marks the round that the card shows. Click a round to fire only that round. Click it again to
+fire the best of all rounds.
+
+**Workers** in the bar under the header sets the number of Web Workers that run the shots.
+Each worker loads its own wasm and its own copy of the game data, and takes the next batch of
+the shared queue. The default is half of the CPU threads, at most 8. The page keeps the
+choice in `localStorage`. A change takes effect at once.
+
 URL parameters: `shooter`, `nations` (comma list), `speed` (targets per worker call, default 8)
 and `hover` (unit id to pin a tooltip once the queue is done).
 
@@ -92,10 +103,10 @@ prints the result JSON that the page shows.
   collision nodes, from either source. `game/shop.go` lays out the trees
   (see below).
 - `sim/` is the simulation behind the `Simulator` interface.
-- `cmd/wasm` exposes `shotdb.open(readFile, readRange, listDir)`, `shotdb.simulate(shooter, target)`
-  to JS.
+- `cmd/wasm` exposes `shotdb.open(readFile, readRange, listDir)`, `shotdb.rounds(shooter)` and
+  `shotdb.simulate(shooter, target, round)` to JS. `round` -1 fires every round and keeps the best.
 - `web/` holds the page sources: `index.html`, `style.css` and `src/`. `src/worker.ts` runs
-  the wasm and reads the chosen folder. `src/app.ts` is the page, the queue and the
+  the wasm and reads the chosen folder. `src/app.ts` is the page, the worker pool, the queue and the
   remembered folder. `src/types.ts` has the shapes of the wasm JSON and of the worker
   messages. `src/wasm.d.ts` and `src/fs-access.d.ts` declare the wasm API and the parts of
   the File System Access API that the TypeScript DOM types do not have.

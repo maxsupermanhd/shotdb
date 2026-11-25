@@ -36,7 +36,7 @@ func run(dir, shooter string, targets []string) error {
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	for _, t := range targets {
-		r, err := s.Simulate(shooter, t)
+		r, err := s.Simulate(shooter, t, -1)
 		if err != nil {
 			return err
 		}

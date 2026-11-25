@@ -84,11 +84,13 @@ self.onmessage = async ({ data: msg }: MessageEvent<Request>) => {
       source = msg.source;
       dirs.clear();
       reply({ id: msg.id, info: JSON.parse(await shotdb.open(readFile, readRange, listDir)) });
+    } else if (msg.op === "rounds") {
+      reply({ id: msg.id, rounds: JSON.parse(await shotdb.rounds(msg.shooter)) });
     } else {
       const results: TargetResult[] = [];
       for (const target of msg.targets) {
         try {
-          results.push(JSON.parse(await shotdb.simulate(msg.shooter, target)));
+          results.push(JSON.parse(await shotdb.simulate(msg.shooter, target, msg.round)));
         } catch (err) {
           results.push({ target, error: message(err) });
         }

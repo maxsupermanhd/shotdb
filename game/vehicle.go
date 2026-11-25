@@ -129,6 +129,7 @@ func (p *Part) Mult(kind string) float64 {
 type Shell struct {
 	Name    string  // bulletName, for example 75mm_m61
 	Label   string  // display name from the language files
+	Gun     string  // display name of the weapon that fires it
 	Type    string  // bulletType, for example apcbc_tank
 	Caliber float64 // m
 	DmgCal  float64 // damageCaliber in m, else caliber
@@ -472,6 +473,11 @@ func (d *Data) shells(t tree, v *Vehicle) error {
 				}
 				d.weapons[path] = wt
 			}
+			base := strings.TrimSuffix(path[strings.LastIndex(path, "/")+1:], ".blk")
+			gun := d.names["weapons/"+base]
+			if gun == "" {
+				gun = base
+			}
 			for _, b := range bullets(wt) {
 				s, err := d.shell(b)
 				if err != nil {
@@ -487,6 +493,7 @@ func (d *Data) shells(t tree, v *Vehicle) error {
 					continue
 				}
 				seen[key] = true
+				s.Gun = gun
 				v.Shells = append(v.Shells, s)
 			}
 		}
