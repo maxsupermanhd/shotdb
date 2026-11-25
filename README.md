@@ -20,7 +20,7 @@ Go modules, and after this step all is offline:
 
     go mod download
     ./build.sh                    # builds everything into dist/
-    ./serve.sh                    # serves dist/ at http://localhost:8000/  (PORT to change)
+    ./serve.sh                    # serves dist/ at https://localhost:8000/  (HOST, PORT to change)
 
 `build.sh` deletes `dist/`, builds `dist/shotdb.wasm`, copies `wasm_exec.js` from the local
 Go (`$(go env GOROOT)/lib/wasm/`) and then runs `go run ./cmd/build`. `cmd/build` uses the
@@ -32,7 +32,8 @@ All paths in `dist/` are relative, so `dist/` works under any subpath.
 esbuild only removes the TypeScript types. No build step checks the types. The `tsconfig`
 files are there for the editor only.
 
-`cmd/serve` is a plain static file server for `dist/` (`-dir` to serve another folder). Any
+`cmd/serve` serves `dist/` over HTTPS with a self-signed certificate that it makes at each start.
+The browser shows a warning, which you must accept. Use `-dir` to serve another folder. Any
 other static server also works. The GitHub Pages workflow runs `build.sh` and publishes
 `dist/`. The `Dockerfile` runs `build.sh` in a Go stage, and nginx serves `dist/`.
 The game files never go through the server: the page reads them in the browser, from the
@@ -98,7 +99,7 @@ prints the result JSON that the page shows.
   messages. `src/wasm.d.ts` and `src/fs-access.d.ts` declare the wasm API and the parts of
   the File System Access API that the TypeScript DOM types do not have.
 - `cmd/build` bundles `web/` into `dist/` with esbuild.
-- `cmd/serve` serves `dist/` as static files.
+- `cmd/serve` serves `dist/` as static files over HTTPS.
 
 ## Trees and icons
 
