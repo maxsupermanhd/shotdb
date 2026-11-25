@@ -201,12 +201,14 @@ function fillPicker() {
 let saved: FileSystemDirectoryHandle | null = null; // the remembered folder
 
 function setupOpen() {
-  const dirInput = $<HTMLInputElement>("#dir-input");
+  if (!window.showDirectoryPicker) {
+    $<HTMLButtonElement>("#open").disabled = true;
+    return setStatus("This browser has no File System Access API. Use a Chromium browser.", true);
+  }
   $("#open").addEventListener("click", async () => {
-    if (!window.showDirectoryPicker) return dirInput.click();
     let handle: FileSystemDirectoryHandle;
     try {
-      handle = await window.showDirectoryPicker({ id: "wt-data", mode: "read" });
+      handle = await window.showDirectoryPicker!({ id: "wt-data", mode: "read" });
     } catch (err) {
       if (!(err instanceof DOMException && err.name === "AbortError")) setStatus(message(err), true);
       return;
@@ -227,14 +229,6 @@ function setupOpen() {
     openSource({ kind: "handle", handle: saved }, saved.name);
   });
   $("#forget").addEventListener("click", () => remember(null));
-  dirInput.addEventListener("change", () => {
-    const list = [...dirInput.files ?? []];
-    if (!list.length) return;
-    // paths below the chosen folder, which is the first segment
-    const files = new Map(list.map((f) => [f.webkitRelativePath.split("/").slice(1).join("/"), f]));
-    openSource({ kind: "files", files }, list[0].webkitRelativePath.split("/")[0]);
-  });
-  if (!window.showDirectoryPicker) return setStatus("This browser cannot remember the folder: pick it on each visit");
   restore();
 }
 

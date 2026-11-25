@@ -62,9 +62,8 @@ access to that folder:
 
 **Choose another** picks a different folder. **Forget** removes the remembered folder.
 
-Other browsers (for example Firefox) fall back to a folder input. The folder input lists
-every file of the folder first (about 16 000 files for the install). It cannot remember the
-folder, so you must pick it on each visit.
+The page needs the File System Access API (`showDirectoryPicker`), so use a Chromium browser.
+Firefox and Safari do not have it.
 
 Then pick the shooter in the box at the top, or click a card. Shots run from the shooter's RB
 battle rating outwards, up and down. Hover a card for the details.
