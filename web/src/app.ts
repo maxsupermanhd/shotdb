@@ -76,6 +76,7 @@ setupTrees();
 setupLines();
 setupCompact();
 setupPicker();
+setupConfirm();
 setupOpen();
 
 // Default: half of the cores, at most 8.
@@ -96,12 +97,15 @@ function setupWorkers() {
 function setupLines() {
   const select = $<HTMLSelectElement>("#lines");
   select.addEventListener("change", () => {
-    localStorage.setItem("shotdb.lines", select.value);
-    run({ shooter: state.shooter, round: state.round, lines: Number(select.value) });
+    const n = Number(select.value);
+    choose({ shooter: state.shooter, round: state.round, lines: n }, `Fire ${n} lines a round?`, () => (select.value = String(state.lines)));
   });
 }
 
-const run = (c: Choice) => tell({ op: "run", ...c });
+function run(c: Choice) {
+  if (c.lines) localStorage.setItem("shotdb.lines", String(c.lines));
+  tell({ op: "run", ...c });
+}
 // the count in the Shots box
 const lines = () => Number($<HTMLSelectElement>("#lines").value) || state.lines;
 
@@ -227,7 +231,8 @@ function setupTrees() {
   const tip = $("#tooltip");
   main.addEventListener("click", (e) => {
     const card = (e.target as Element).closest<HTMLElement>(".card[data-id]");
-    if (card && shootable(card.dataset.id!)) selectShooter(card.dataset.id!);
+    const id = card?.dataset.id;
+    if (id && shootable(id)) choose({ shooter: id, round: id === state.shooter ? state.round : -1, lines: lines() }, `Shoot with ${name(id)}?`);
   });
   main.addEventListener("mouseover", (e) => {
     const card = (e.target as Element).closest<HTMLElement>("[data-id]");
@@ -244,7 +249,9 @@ function setupTrees() {
     const row = (e.target as Element).closest<HTMLElement>(".round");
     if (!row) return;
     const i = Number(row.dataset.index);
-    run({ shooter: state.shooter, round: state.round === i ? -1 : i, lines: lines() });
+    const round = state.round === i ? -1 : i;
+    const r = state.rounds!.rounds;
+    choose({ shooter: state.shooter, round, lines: lines() }, round < 0 ? `Fire the best of all ${r.length} rounds?` : `Fire only ${r[i].name}?`);
   });
   $("#pause").addEventListener("click", () => tell({ op: "pause" }));
   main.innerHTML = `<p class="empty">Open the War Thunder install folder to show the research trees.</p>`;
@@ -653,18 +660,75 @@ function shootable(id: string) {
   return state.game.has(id);
 }
 
-// A new shooter fires the best of all rounds.
+// The search box is a clear pick, so it runs with no question. A new shooter fires the best of all rounds.
 function selectShooter(id: string) {
   run({ shooter: id, round: id === state.shooter ? state.round : -1, lines: lines() });
 }
 
+let asking: { c: Choice; cancel?: () => void } | null = null; // the choice in the confirm bar
+
+// Runs choice c. When the queue still has work and the store does not have all results of c, the confirm bar
+// asks first. cancel undoes the control's change when the user says no.
+async function choose(c: Choice, question: string, cancel?: () => void) {
+  const busy = () => state.shooter !== "" && state.progress.done < state.progress.total && !state.stopped && pool.length > 0;
+  if (!busy()) return run(c);
+  let have = 0;
+  try {
+    have = (await stored(c)).size;
+  } catch (err) {
+    console.warn(`cannot read the kept results: ${message(err)}`);
+  }
+  if (!busy() || have >= state.queue.length) return run(c);
+  asking?.cancel?.();
+  asking = { c, cancel };
+  const { done, total } = state.progress;
+  $("#confirm-text").textContent = `${question} The queue of ${name(state.shooter)} stops at ${done} / ${total}; its results stay kept.`
+    + (have ? ` ${have} of the new results are kept already.` : "");
+  const bar = $("#confirm");
+  bar.style.top = `${$("main.trees").getBoundingClientRect().top + 8}px`;
+  bar.hidden = false;
+  $("#confirm-run").focus();
+}
+
+function answer(yes: boolean) {
+  const a = asking;
+  asking = null;
+  $("#confirm").hidden = true;
+  if (!a) return;
+  yes ? run(a.c) : a.cancel?.();
+}
+
+function setupConfirm() {
+  $("#confirm-run").addEventListener("click", () => answer(true));
+  $("#confirm-cancel").addEventListener("click", () => answer(false));
+  addEventListener("keydown", (e) => {
+    if (!asking) return;
+    if (e.key === "Escape") answer(false);
+    // Enter on a focused button clicks it already
+    else if (e.key === "Enter" && !(e.target instanceof HTMLButtonElement || e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement)) answer(true);
+  });
+}
+
+let prev: Choice | null = null; // the choice before the last change of shooter
+
 function shooterInfo(note = "") {
   const s = state.game.get(state.shooter)!;
-  $("#shooter-info").textContent = `${s.role}${s.rank ? ` · Rank ${RANKS[s.rank - 1]}` : ""} · BR ${s.br.toFixed(1)} · ${note || "click any card to shoot with it"}`;
+  const info = $("#shooter-info");
+  info.textContent = `${s.role}${s.rank ? ` · Rank ${RANKS[s.rank - 1]}` : ""} · BR ${s.br.toFixed(1)} · ${note || "click any card to shoot with it"}`;
+  const back = prev;
+  if (!back || back.shooter === state.shooter || !state.game.has(back.shooter)) return;
+  const button = document.createElement("button");
+  button.className = "link-btn";
+  button.textContent = `back to ${name(back.shooter)}`;
+  button.title = "Shoot with the shooter before. Its kept results show at once.";
+  button.addEventListener("click", () => run({ ...back, lines: lines() }));
+  info.append(" · ", button);
 }
 
 // A new queue of the manager: outwards from the shooter's BR, or none when no shooter is picked.
 function newQueue(q: Extract<FromManager, { op: "queue" }>) {
+  answer(false); // the question is about the old queue
+  if (state.shooter && q.shooter !== state.shooter) prev = { shooter: state.shooter, round: state.round, lines: state.lines };
   state.gen = q.gen;
   state.shooter = q.shooter;
   state.round = q.round ?? -1;

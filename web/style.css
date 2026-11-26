@@ -201,6 +201,18 @@ body {
 .card-views { position: absolute; left: 0; right: 0; bottom: 0; display: flex; height: 3px; gap: 1px; }
 .card-views i { flex: 1; }
 
+/* asks before a click stops a queue with work left; app.ts sets top under the bars */
+.confirm {
+  position: fixed; z-index: 40; left: 50%; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 10px;
+  width: max-content; max-width: calc(100vw - 32px);
+  padding: 8px 12px;
+  background: #0d1014; border: 1px solid var(--accent); border-radius: 6px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / .5);
+}
+.confirm .chip { font-size: 12px; padding: 4px 10px; border-radius: 4px; }
+.confirm button:focus-visible { outline: 2px solid var(--text); outline-offset: 1px; }
+
 .empty { grid-column: 1 / -1; padding: 24px 4px; color: var(--muted); }
 
 .stack { display: flex; flex-direction: column; gap: 3px; }

@@ -89,6 +89,14 @@ outwards, up and down. Hover a card for the details.
 and take no new one. **Resume** continues from the same place. A new shooter or round starts
 its queue at once, also when the queue is paused.
 
+A click on a card or a round, or a change of **Shots**, first asks in a small bar over the
+trees when it would stop a queue that has work left (running or paused): **Run** (or Enter)
+starts the new queue, **Cancel** (or Escape) keeps the old one and puts **Shots** back. The
+results of the stopped queue stay kept (see [Kept results](#kept-results)). The page does not
+ask when no queue runs, when the queue is done or stopped, when the kept results hold all
+targets of the new choice, or when you pick the shooter in the box at the top. After a change
+of shooter, **back to <shooter>** under the box goes back to the shooter before.
+
 ### Kept results
 
 The page keeps each shot result in IndexedDB (database `shotdb`, stores `results` and
