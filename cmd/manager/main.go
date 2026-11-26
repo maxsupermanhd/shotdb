@@ -59,6 +59,7 @@ type worker struct {
 type manager struct {
 	files     jsFiles
 	useSource js.Value
+	source    js.Value // of the data; undefined before the first good open
 	data      *game.Data
 	targets   []string // the units of the trees that the data has
 	tables    []byte   // packet of the tables, for workers that join later
@@ -211,20 +212,31 @@ func (m *manager) stop() {
 	}
 }
 
+// open loads the game files of src. The old data goes first, as wasm memory never
+// shrinks. When the new data fails, the old source loads again and its queue continues.
 func (m *manager) open(src js.Value) {
-	m.stop()
+	m.data = nil
 	m.useSource.Invoke(src)
-	m.data, m.targets, m.tables, m.shooterPkt = nil, nil, nil, nil
 	d, err := guard(func() (*game.Data, error) { return game.Open(m.files) })
+	var tables []byte
 	if err == nil {
-		m.tables, err = packet.Tables(&d.Tables)
+		tables, err = packet.Tables(&d.Tables)
 	}
 	if err != nil {
 		post(map[string]any{"op": "opened", "error": err.Error()})
-		m.restart() // with no data: no shooter, no queue
+		m.useSource.Invoke(m.source)
+		if m.source.IsUndefined() {
+			return
+		}
+		if m.data, err = guard(func() (*game.Data, error) { return game.Open(m.files) }); err != nil {
+			post(map[string]any{"op": "error", "error": "cannot load the old folder again: " + err.Error()})
+			m.source, m.targets, m.tables = js.Undefined(), nil, nil
+			m.restart() // with no data: no shooter, no queue
+		}
 		return
 	}
-	m.data = d
+	m.stop()
+	m.data, m.source, m.tables, m.targets = d, src, tables, nil
 	seen := map[string]bool{}
 	for _, t := range d.Trees {
 		for _, r := range t.Ranks {
