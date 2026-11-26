@@ -107,7 +107,7 @@ func (s *shot) charge(i int32, sp span) (charge, cost float64) {
 	if p.Module && !mesh {
 		charge = base
 	} else {
-		charge = base * slope(s.d, s.sh.Shell, p, base, cos, mesh)
+		charge = base * slope(s.d, s.sh.Shell, p, base, cos)
 	}
 	charge = math.Min(charge, p.Cap(mech))
 	if mesh {

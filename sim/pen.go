@@ -82,16 +82,10 @@ func speedFor(d *game.Data, sh *game.Shell, pen, flat, speed float64) float64 {
 
 // slope is the S factor of the shell's slope preset, with the game's breach
 // rule and scale cap. Without a preset it is 1/cos. base is quality x thickness.
-func slope(d *game.Data, sh *game.Shell, p *game.Part, base, cos float64, mesh bool) float64 {
+func slope(d *game.Data, sh *game.Shell, p *game.Part, base, cos float64) float64 {
 	cal := sh.DmgCal * 1000
-	if base > 0 && d.ArmorBreachK*base <= cal {
-		if mesh {
-			return 1
-		}
-		return math.Min(1/cos, d.MaxArmorScale)
-	}
 	t, ok := d.Slope[sh.SlopePreset]
-	if !ok || base <= 0 || cal <= p.SlopeMin {
+	if !ok || base <= 0 || d.ArmorBreachK*base <= cal || cal <= p.SlopeMin {
 		return math.Min(1/cos, d.MaxArmorScale)
 	}
 	inv := t.At(cos, cal/base)
