@@ -181,9 +181,15 @@ From the game, as the game does it (formulas from the knowledge bank):
   damage, gated by `partDamageEffectThreshold`) and `onKill` draws: fires, ammo explosions,
   fuel tank explosions, crew and module kills. The vehicle dies when fewer crew than
   `minCrewCount` (default 2) live, when a rack whose round has a filler explodes (or a
-  charges rack burns, as the rack's flags say), or when a fuel tank explodes.
+  charges rack burns, as the rack's flags say), or when an internal fuel tank explodes.
+  An exterior tank (group `fuel_tanks_exterior`, fire preset `fuel_exterior`) does not end
+  the vehicle.
 
 Approximated, and why:
+
+- **An exterior fuel tank's explosion** does nothing. The game gives it its own splash
+  table (`externalFuelMassToSplashParams` in `damagemodel.blk`, by fuel mass), but the fuel
+  mass of each tank is not read here.
 
 - **One ray per shell and fragment.** The game traces a small pattern of rays per shell and
   groups them; here the centre ray stands for the shell. Fragments are traced as at most 8

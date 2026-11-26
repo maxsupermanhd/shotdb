@@ -44,7 +44,8 @@ func (s *shot) resolve() fate {
 				case !t.v.RackExplosive || rack.Charges:
 					f.destroyed = f.destroyed || rack.FatalFire
 				}
-			} else if strings.HasPrefix(p.Name, "fuel_tank") {
+			} else if strings.HasPrefix(p.Name, "fuel_tank") && p.Group != "fuel_tanks_exterior" {
+				// An exterior tank burns and bursts outside the hull: the game gives it its own splash table.
 				f.destroyed = true
 			}
 		case "fire":
