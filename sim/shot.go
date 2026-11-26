@@ -174,7 +174,7 @@ func (s *shot) kinetic(o, d vec, spans []span, pen, speed float64, bounces int) 
 	fuseAt := func() float64 { return armed + sh.FuseDelay }
 	explode := func(at float64) {
 		burst = true
-		p := along(o, d, at)
+		p := geom.Along(o, d, at)
 		s.explode(p, d)
 		if sh.Rocket && sh.Cumulative > 0 {
 			s.jet(o, d, spans, at)
@@ -255,8 +255,8 @@ func (s *shot) kinetic(o, d vec, spans []span, pen, speed float64, bounces int) 
 // bounce sends the shell on in the mirror direction from a ricochet point.
 func (s *shot) bounce(o, d vec, sp span, pen, speed float64, bounces int) {
 	n := sp.n
-	nd := normalize(sub(d, scale(n, 2*dot(d, n))))
-	at := add(along(o, d, sp.in), scale(nd, 1e-3))
+	nd := geom.Normalize(geom.Sub(d, geom.Scale(n, 2*geom.Dot(d, n))))
+	at := geom.Add(geom.Along(o, d, sp.in), geom.Scale(nd, 1e-3))
 	spans := s.t.spans(at, nd, traceLength, &s.hits, nil)
 	// The plate it bounced off is not met again on the way out.
 	kept := spans[:0]
@@ -285,8 +285,8 @@ func (s *shot) heat(o, d vec, spans []span, bounces int) {
 				s.ricochet = true
 				if bounces < maxBounces {
 					n := sp.n
-					nd := normalize(sub(d, scale(n, 2*dot(d, n))))
-					at := add(along(o, d, sp.in), scale(nd, 1e-3))
+					nd := geom.Normalize(geom.Sub(d, geom.Scale(n, 2*geom.Dot(d, n))))
+					at := geom.Add(geom.Along(o, d, sp.in), geom.Scale(nd, 1e-3))
 					var kept []span
 					for _, x := range s.t.spans(at, nd, traceLength, &s.hits, nil) {
 						if x.part != sp.part {
@@ -300,7 +300,7 @@ func (s *shot) heat(o, d vec, spans []span, bounces int) {
 		}
 		at := s.face(sp.in, 0)
 		if sh.ExplMass > 0 {
-			s.explode(along(o, d, at), d)
+			s.explode(geom.Along(o, d, at), d)
 		}
 		s.jet(o, d, spans, at)
 		return
@@ -369,7 +369,7 @@ func (s *shot) jet(o, d vec, spans []span, start float64) {
 // cone throws the secondary fragments of a perforated part from its exit point.
 // The part does not charge its own fragments.
 func (s *shot) cone(preset string, o, d vec, sp span, residual, cost float64) {
-	at := along(o, d, s.exit(sp))
+	at := geom.Along(o, d, s.exit(sp))
 	pr := s.d.Spall[preset]
 	if pr == nil {
 		pr = s.d.Spall["default"]
@@ -379,7 +379,7 @@ func (s *shot) cone(preset string, o, d vec, sp span, residual, cost float64) {
 	}
 	axis := d
 	if pr.ByNormal {
-		axis = scale(sp.n, -1)
+		axis = geom.Scale(sp.n, -1)
 	}
 	cal := s.sh.DmgCal * 1000
 	var shellTotal, armorTotal float64
@@ -416,9 +416,9 @@ func (s *shot) throw(count float64, axis, at vec, inner, outer float64, f fragme
 	}
 	rays := min(int(count), rayCap)
 	f.weight = count / float64(rays)
-	f.o = add(at, scale(axis, 1e-4))
-	u := normalize(cross(axis, vec{0.3, 1, 0.1}))
-	w := cross(axis, u)
+	f.o = geom.Add(at, geom.Scale(axis, 1e-4))
+	u := geom.Normalize(geom.Cross(axis, vec{0.3, 1, 0.1}))
+	w := geom.Cross(axis, u)
 	ci, co := math.Cos(inner*math.Pi/180), math.Cos(outer*math.Pi/180)
 	var agg []partDamage
 	for range rays {
@@ -426,7 +426,7 @@ func (s *shot) throw(count float64, axis, at vec, inner, outer float64, f fragme
 		c := ci + (co-ci)*s.rng.Float64()
 		sn := math.Sqrt(math.Max(0, 1-c*c))
 		phi := 2 * math.Pi * s.rng.Float64()
-		f.d = add(scale(axis, c), add(scale(u, sn*math.Cos(phi)), scale(w, sn*math.Sin(phi))))
+		f.d = geom.Add(geom.Scale(axis, c), geom.Add(geom.Scale(u, sn*math.Cos(phi)), geom.Scale(w, sn*math.Sin(phi))))
 		agg = s.fly(f, agg)
 	}
 	for _, a := range agg {
@@ -579,7 +579,7 @@ func (s *shot) explode(at, d vec) {
 			if pp < s.d.SplashThreshold*p.Q("pressure")*p.Thickness {
 				continue
 			}
-			if a := falloff(norm(sub(s.t.center[i], at)), in, out) * pd; a > 0 {
+			if a := falloff(geom.Norm(geom.Sub(s.t.center[i], at)), in, out) * pd; a > 0 {
 				s.hit(i, "pressure", a, 1)
 			}
 		}
@@ -592,7 +592,7 @@ func (s *shot) explode(at, d vec) {
 // on the way cost their line-of-sight thickness, solid parts their chord.
 func (s *shot) reach(at vec, i int32, outer, inner, dmg, pen float64, mech string) float64 {
 	c := s.t.center[i]
-	dist := norm(sub(c, at))
+	dist := geom.Norm(geom.Sub(c, at))
 	f := falloff(dist, inner, outer)
 	if f <= 0 {
 		return 0
@@ -603,7 +603,7 @@ func (s *shot) reach(at vec, i int32, outer, inner, dmg, pen float64, mech strin
 	}
 	if dist > 1e-6 {
 		armour := 0.0
-		s.leaf = s.t.spans(at, scale(sub(c, at), 1/dist), dist, &s.hits, s.leaf[:0])
+		s.leaf = s.t.spans(at, geom.Scale(geom.Sub(c, at), 1/dist), dist, &s.hits, s.leaf[:0])
 		for _, sp := range s.leaf {
 			q := s.t.parts[sp.part]
 			if sp.part == i || q.Module {

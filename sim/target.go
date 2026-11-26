@@ -134,16 +134,16 @@ var elevations = []float64{0, 6}
 func (t *target) lines(bearings []float64) []sample {
 	var out []sample
 	var buf []geom.Hit
-	mid := scale(add(t.mesh.Min, t.mesh.Max), 0.5)
-	radius := 0.5*norm(sub(t.mesh.Max, t.mesh.Min)) + 1
+	mid := geom.Scale(geom.Add(t.mesh.Min, t.mesh.Max), 0.5)
+	radius := 0.5*geom.Norm(geom.Sub(t.mesh.Max, t.mesh.Min)) + 1
 	for _, b := range bearings {
 		for _, e := range elevations {
 			br, er := b*math.Pi/180, e*math.Pi/180
 			// The shooter sits at this bearing from the nose (+x), toward +z for a positive one.
 			from := vec{math.Cos(br) * math.Cos(er), math.Sin(er), math.Sin(br) * math.Cos(er)}
-			d := scale(from, -1)
-			u := normalize(cross(vec{0, 1, 0}, d))
-			w := cross(d, u)
+			d := geom.Scale(from, -1)
+			u := geom.Normalize(geom.Cross(vec{0, 1, 0}, d))
+			w := geom.Cross(d, u)
 			umin, umax, wmin, wmax := math.Inf(1), math.Inf(-1), math.Inf(1), math.Inf(-1)
 			for k := range 8 {
 				// Corner k of the bounding box: bit a of k picks the high side on axis a.
@@ -153,15 +153,15 @@ func (t *target) lines(bearings []float64) []sample {
 						c[a] = t.mesh.Max[a]
 					}
 				}
-				r := sub(c, mid)
-				umin, umax = math.Min(umin, dot(r, u)), math.Max(umax, dot(r, u))
-				wmin, wmax = math.Min(wmin, dot(r, w)), math.Max(wmax, dot(r, w))
+				r := geom.Sub(c, mid)
+				umin, umax = math.Min(umin, geom.Dot(r, u)), math.Max(umax, geom.Dot(r, u))
+				wmin, wmax = math.Min(wmin, geom.Dot(r, w)), math.Max(wmax, geom.Dot(r, w))
 			}
 			step := math.Max(umax-umin, wmax-wmin) / gridCells
 			var hit []sample
 			for a := umin + step/2; a < umax; a += step {
 				for c := wmin + step/2; c < wmax; c += step {
-					o := add(add(mid, scale(from, radius)), add(scale(u, a), scale(w, c)))
+					o := geom.Add(geom.Add(mid, geom.Scale(from, radius)), geom.Add(geom.Scale(u, a), geom.Scale(w, c)))
 					sp := t.spans(o, d, 2*radius, &buf, nil)
 					if len(sp) > 0 {
 						hit = append(hit, sample{o: o, d: d, spans: sp})
@@ -176,16 +176,4 @@ func (t *target) lines(bearings []float64) []sample {
 		}
 	}
 	return out
-}
-
-
-func add(a, b vec) vec              { return vec{a[0] + b[0], a[1] + b[1], a[2] + b[2]} }
-func sub(a, b vec) vec              { return vec{a[0] - b[0], a[1] - b[1], a[2] - b[2]} }
-func scale(a vec, s float64) vec    { return vec{a[0] * s, a[1] * s, a[2] * s} }
-func dot(a, b vec) float64          { return a[0]*b[0] + a[1]*b[1] + a[2]*b[2] }
-func norm(a vec) float64            { return math.Sqrt(dot(a, a)) }
-func normalize(a vec) vec           { return scale(a, 1/norm(a)) }
-func along(o, d vec, t float64) vec { return add(o, scale(d, t)) }
-func cross(a, b vec) vec {
-	return vec{a[1]*b[2] - a[2]*b[1], a[2]*b[0] - a[0]*b[2], a[0]*b[1] - a[1]*b[0]}
 }

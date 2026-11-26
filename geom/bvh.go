@@ -48,13 +48,13 @@ func Build(in []Tri) *Mesh {
 	m := &Mesh{}
 	cent := make([]Vec, 0, len(in))
 	for _, t := range in {
-		e1, e2 := sub(t.B, t.A), sub(t.C, t.A)
-		n := cross(e1, e2)
-		l := math.Sqrt(dot(n, n))
+		e1, e2 := Sub(t.B, t.A), Sub(t.C, t.A)
+		n := Cross(e1, e2)
+		l := math.Sqrt(Dot(n, n))
 		if l < 1e-12 {
 			continue
 		}
-		m.tris = append(m.tris, tri{a: t.A, e1: e1, e2: e2, n: scale(n, 1/l), part: t.Part})
+		m.tris = append(m.tris, tri{a: t.A, e1: e1, e2: e2, n: Scale(n, 1/l), part: t.Part})
 		cent = append(cent, Vec{(t.A[0] + t.B[0] + t.C[0]) / 3, (t.A[1] + t.B[1] + t.C[1]) / 3, (t.A[2] + t.B[2] + t.C[2]) / 3})
 	}
 	if len(m.tris) == 0 {
@@ -67,7 +67,7 @@ func Build(in []Tri) *Mesh {
 	boxes := make([][2]Vec, len(m.tris))
 	for i, t := range m.tris {
 		boxes[i][0], boxes[i][1] = empty()
-		for _, p := range [3]Vec{t.a, add(t.a, t.e1), add(t.a, t.e2)} {
+		for _, p := range [3]Vec{t.a, Add(t.a, t.e1), Add(t.a, t.e2)} {
 			for k := range 3 {
 				boxes[i][0][k] = min(boxes[i][0][k], p[k])
 				boxes[i][1][k] = max(boxes[i][1][k], p[k])
@@ -90,7 +90,7 @@ func empty() (Vec, Vec) {
 }
 
 func area(min, max Vec) float64 {
-	d := sub(max, min)
+	d := Sub(max, min)
 	return d[0]*d[1] + d[1]*d[2] + d[2]*d[0]
 }
 
@@ -245,40 +245,43 @@ func slab(lo, hi, o, inv Vec, maxT float64) bool {
 
 // Möller-Trumbore, both faces.
 func (t *tri) hit(o, d Vec, maxT float64) (Hit, bool) {
-	p := cross(d, t.e2)
-	det := dot(t.e1, p)
+	p := Cross(d, t.e2)
+	det := Dot(t.e1, p)
 	if math.Abs(det) < 1e-14 {
 		return Hit{}, false
 	}
 	inv := 1 / det
-	s := sub(o, t.a)
-	u := dot(s, p) * inv
+	s := Sub(o, t.a)
+	u := Dot(s, p) * inv
 	if u < 0 || u > 1 {
 		return Hit{}, false
 	}
-	q := cross(s, t.e1)
-	v := dot(d, q) * inv
+	q := Cross(s, t.e1)
+	v := Dot(d, q) * inv
 	if v < 0 || u+v > 1 {
 		return Hit{}, false
 	}
-	tt := dot(t.e2, q) * inv
+	tt := Dot(t.e2, q) * inv
 	if tt <= 1e-9 || tt >= maxT {
 		return Hit{}, false
 	}
 	n := t.n
-	c := dot(n, d)
+	c := Dot(n, d)
 	if c > 0 {
-		n = scale(n, -1)
+		n = Scale(n, -1)
 	} else {
 		c = -c
 	}
 	return Hit{T: tt, Part: t.part, N: n, Cos: min(c, 1)}, true
 }
 
-func add(a, b Vec) Vec           { return Vec{a[0] + b[0], a[1] + b[1], a[2] + b[2]} }
-func sub(a, b Vec) Vec           { return Vec{a[0] - b[0], a[1] - b[1], a[2] - b[2]} }
-func scale(a Vec, s float64) Vec { return Vec{a[0] * s, a[1] * s, a[2] * s} }
-func dot(a, b Vec) float64       { return a[0]*b[0] + a[1]*b[1] + a[2]*b[2] }
-func cross(a, b Vec) Vec {
+func Add(a, b Vec) Vec              { return Vec{a[0] + b[0], a[1] + b[1], a[2] + b[2]} }
+func Sub(a, b Vec) Vec              { return Vec{a[0] - b[0], a[1] - b[1], a[2] - b[2]} }
+func Scale(a Vec, s float64) Vec    { return Vec{a[0] * s, a[1] * s, a[2] * s} }
+func Dot(a, b Vec) float64          { return a[0]*b[0] + a[1]*b[1] + a[2]*b[2] }
+func Norm(a Vec) float64            { return math.Sqrt(Dot(a, a)) }
+func Normalize(a Vec) Vec           { return Scale(a, 1/Norm(a)) }
+func Along(o, d Vec, t float64) Vec { return Add(o, Scale(d, t)) }
+func Cross(a, b Vec) Vec {
 	return Vec{a[1]*b[2] - a[2]*b[1], a[2]*b[0] - a[0]*b[2], a[0]*b[1] - a[1]*b[0]}
 }
