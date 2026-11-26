@@ -33,17 +33,25 @@ var (
 func main() {
 	api := js.Global().Get("Object").New()
 	api.Set("tables", js.FuncOf(func(_ js.Value, args []js.Value) any {
-		return message(guard(func() (err error) {
+		err := guard(func() (err error) {
 			tables, err = packet.ReadTables(bytesOf(args[0]))
 			return err
-		}))
+		})
+		if err != nil {
+			return err.Error()
+		}
+		return ""
 	}))
 	api.Set("shooter", js.FuncOf(func(_ js.Value, args []js.Value) any {
-		return message(guard(func() (err error) {
+		err := guard(func() (err error) {
 			round = args[1].Int()
 			shooter, err = packet.ReadShooter(bytesOf(args[0]))
 			return err
-		}))
+		})
+		if err != nil {
+			return err.Error()
+		}
+		return ""
 	}))
 	api.Set("simulate", js.FuncOf(func(_ js.Value, args []js.Value) any {
 		var out []byte
@@ -82,13 +90,6 @@ func guard(work func() error) (err error) {
 		}
 	}()
 	return work()
-}
-
-func message(err error) string {
-	if err != nil {
-		return err.Error()
-	}
-	return ""
 }
 
 func bytesOf(v js.Value) []byte {
