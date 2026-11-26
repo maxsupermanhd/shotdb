@@ -35,7 +35,7 @@ files are there for the editor only.
 `cmd/serve` serves `dist/` over HTTPS with a self-signed certificate that it makes at each start.
 The browser shows a warning, which you must accept. Use `-dir` to serve another folder. Any
 other static server also works. The GitHub Pages workflow runs `build.sh` and publishes
-`dist/`. The `Dockerfile` runs `build.sh` in a Go stage, and nginx serves `dist/`.
+`dist/`.
 The game files never go through the server: the page reads them in the browser, from the
 folder that you pick.
 
