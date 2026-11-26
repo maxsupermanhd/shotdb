@@ -238,3 +238,41 @@ body {
 .c-nonpen { color: var(--nonpen); }
 .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
 .sw.pending { background: var(--pending); outline: 1px solid var(--line); }
+
+/* compact: each card is a square tile of --tile px (set by fitCompact) with the centre of its picture */
+.compact-ctl { display: flex; align-items: center; gap: 6px; }
+.compact-note { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.compact .trees-grid { --tile: 20px; column-gap: 6px; padding: 0 4px; }
+.compact .nation-head {
+  contain: inline-size; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  display: block; padding: 2px 1px 1px; font-size: 11px; line-height: 13px; border-bottom-width: 1px;
+}
+.compact .nation-head .sub { display: none; }
+.compact .rank-label {
+  contain: inline-size; overflow: hidden; white-space: nowrap;
+  font-size: 10px; line-height: 12px; margin-bottom: 2px;
+}
+.compact .rank { padding: 2px 0; }
+.compact .rank-body { gap: 3px; }
+.compact .grid { border-spacing: 2px; margin: -2px; }
+.compact .grid.premium { padding-left: 3px; }
+.compact .grid td { width: var(--tile); height: var(--tile); }
+.compact .stack { gap: 1px; }
+.compact .card { width: var(--tile); height: var(--tile); padding: 0; border: 0; border-radius: 2px; }
+.compact .card-name, .compact .card-br, .compact .card-views { display: none; }
+/* the frame lies over the picture */
+.compact .card::after, .compact .card.shooter::after {
+  content: ""; position: absolute; inset: 0; z-index: 1; padding: 0;
+  border-radius: inherit; background: none; pointer-events: none;
+}
+.compact .card.running::after { box-shadow: inset 0 0 0 1px var(--accent); }
+.compact .card:hover::after { box-shadow: inset 0 0 0 1px #fff; }
+.compact .card.shooter { outline-offset: 0; z-index: 2; }
+.compact .card.shooter::after { box-shadow: inset 0 0 0 1px #111; }
+.compact .card.running { box-shadow: none; }
+/* The picture keeps its normal size, so the tile shows the square at its centre. It takes the
+   hue of the result colour under it. */
+.compact .card-icon {
+  left: 50%; top: 50%; bottom: auto; transform: translate(-50%, -50%);
+  filter: none; mix-blend-mode: luminosity;
+}

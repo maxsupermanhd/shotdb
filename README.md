@@ -81,6 +81,12 @@ Each worker loads its own wasm and its own copy of the game data, and takes the 
 the shared queue. The default is half of the CPU threads, at most 8. The page keeps the
 choice in `localStorage`. A change takes effect at once.
 
+**Compact** in the bar under the header shows each vehicle as a square tile with the result
+colour. The page sets the tile size so that all shown nations fit the window width, at most
+66 px (the width of the card picture). The trees scroll down. The picture keeps its normal
+size, so a small tile shows the square at the centre of the picture. Below 8 px the page keeps
+8 px tiles and scrolls sideways. The page keeps the choice in `localStorage`.
+
 URL parameters: `shooter`, `nations` (comma list), `speed` (targets per worker call, default 8)
 and `hover` (unit id to pin a tooltip once the queue is done).
 

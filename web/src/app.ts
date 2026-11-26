@@ -4,6 +4,7 @@ import type { Card, Grid, Outcome, Plate, Replies, Reply, Request, Rounds, Sourc
 const RANKS = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"];
 const OUTCOMES: Outcome[] = ["kill", "pen", "shatter", "ricochet", "nonpen"];
 const OUTCOME_LABEL: Record<Outcome, string> = { kill: "Pen + kill", pen: "Pen, no kill", shatter: "Pen, core broke", ricochet: "Ricochet", nonpen: "No pen" };
+const TILE_MIN = 8, TILE_MAX = 66; // TILE_MAX is the width of the card picture
 
 const params = new URLSearchParams(location.search);
 const nationsParam = params.get("nations");
@@ -61,6 +62,7 @@ const icons = new IntersectionObserver((entries) => {
   }
 }, { root: $("#trees").parentElement, rootMargin: "400px" });
 setupTrees();
+setupCompact();
 setupPicker();
 setupOpen();
 
@@ -224,6 +226,48 @@ function applyNations() {
     document.querySelector(`.chip[data-country="${tree.country}"]`)!.classList.toggle("on", on);
   }
   syncUrl();
+  fitCompact();
+}
+
+
+function setupCompact() {
+  const button = $("#compact");
+  const set = (on: boolean) => {
+    document.body.classList.toggle("compact", on);
+    button.classList.toggle("on", on);
+    fitCompact();
+  };
+  button.addEventListener("click", () => {
+    const on = !document.body.classList.contains("compact");
+    localStorage.setItem("shotdb.compact", on ? "1" : "0");
+    set(on);
+  });
+  set(localStorage.getItem("shotdb.compact") === "1");
+  // the view changes size with the window and with the header (the rounds panel)
+  new ResizeObserver(() => fitCompact()).observe($("#trees").parentElement!);
+}
+
+// The compact grid is only as wide as the shown trees, and its width is linear in the tile
+// size. Two trial layouts give the line, which gives the largest tile that fits the view's width.
+function fitCompact() {
+  const main = $("#trees");
+  const note = $("#compact-note");
+  if (!document.body.classList.contains("compact") || !main.querySelector(".nation-head:not([hidden])")) {
+    main.style.removeProperty("--tile");
+    note.textContent = "";
+    return;
+  }
+  const width = (s: number) => {
+    main.style.setProperty("--tile", `${s}px`);
+    return main.offsetWidth;
+  };
+  const w1 = width(10), w2 = width(20);
+  const dw = (w2 - w1) / 10;
+  // one pixel spare for rounding; the vertical scrollbar takes its width from the view
+  const tile = Math.min(TILE_MAX, Math.floor((main.parentElement!.clientWidth - 1 - (w1 - 10 * dw)) / dw));
+  width(Math.max(TILE_MIN, tile));
+  note.textContent = tile >= TILE_MIN ? `${tile} px` : `does not fit at ${TILE_MIN} px: scroll`;
+  note.title = tile >= TILE_MIN ? "" : `The shown trees need tiles below ${TILE_MIN} px to fit the window width. Show fewer nations or use a wider window.`;
 }
 
 function setupPicker() {
