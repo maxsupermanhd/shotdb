@@ -2,7 +2,9 @@
 
 Static page that shows the ground tech trees of all nations side by side and colours each
 vehicle card by how well a chosen shooter does against it in realistic battles (RB). The shot
-simulation is written in Go, built to WebAssembly and runs in a Web Worker in the page.
+simulation is written in Go, built to WebAssembly and runs in Web Workers in the page: one
+manager worker reads the game files and runs the queue, and a pool of compute workers fires
+the shots.
 
 **This project was fully vibecoded.** An AI wrote all of the code, and the results are not verified against the real game.
 
@@ -22,10 +24,11 @@ Go modules, and after this step all is offline:
     ./build.sh                    # builds everything into dist/
     ./serve.sh                    # serves dist/ at https://localhost:8000/  (HOST, PORT to change)
 
-`build.sh` deletes `dist/`, builds `dist/shotdb.wasm`, copies `wasm_exec.js` from the local
+`build.sh` deletes `dist/`, builds `dist/manager.wasm` and `dist/compute.wasm`, copies `wasm_exec.js` from the local
 Go (`$(go env GOROOT)/lib/wasm/`) and then runs `go run ./cmd/build`. `cmd/build` uses the
 Go API of esbuild (github.com/evanw/esbuild) to bundle and minify `web/src/app.ts` to
-`dist/app.js`, `web/src/worker.ts` to `dist/worker.js` and `web/style.css`, and it writes
+`dist/app.js`, `web/src/manager.ts` to `dist/manager.js`, `web/src/compute.ts` to
+`dist/compute.js` and `web/style.css`, and it writes
 `index.html` with the script path for `app.js`. `-minify=false` keeps the bundles readable.
 All paths in `dist/` are relative, so `dist/` works under any subpath.
 
@@ -71,7 +74,7 @@ Then pick the shooter in the box at the top, or click a card. The page does not 
 by itself, so no shots run until you pick one. Shots run from the shooter's RB battle rating
 outwards, up and down. Hover a card for the details.
 
-**Pause** next to the progress bar stops the queue: the workers finish the batch that they run
+**Pause** next to the progress bar stops the queue: the compute workers finish the targets that they hold
 and take no new one. **Resume** continues from the same place. A new shooter or round starts
 its queue at once, also when the queue is paused.
 
@@ -81,10 +84,14 @@ counts the targets on which each round gave the best score. When you hover a car
 marks the round that the card shows. Click a round to fire only that round. Click it again to
 fire the best of all rounds.
 
-**Workers** in the bar under the header sets the number of Web Workers that run the shots.
-Each worker loads its own wasm and its own copy of the game data, and takes the next batch of
-the shared queue. The default is half of the CPU threads, at most 8. The page keeps the
-choice in `localStorage`. A change takes effect at once.
+**Workers** in the bar under the header sets the number of compute workers (Web Workers) that
+run the shots. One more worker, the manager, reads the game files and runs the queue (see
+[Workers](#workers)). The default is half of the CPU threads, at most 8. The page keeps the
+choice in `localStorage`. A change takes effect at once. A removed worker stops at once, and
+the manager puts its targets back at the front of the queue.
+
+When a compute worker fails, its targets show the error, and the other workers go on. When
+the manager fails, the page shows the error and the queue stops.
 
 **Compact** in the bar under the header shows each vehicle as a small square tile: the centre
 of its picture in the result colour, and the front, side and rear bars in the bottom 4 px. The
@@ -94,7 +101,8 @@ picture height and the bars). The trees scroll down. The picture keeps its natur
 the tile width, so a tile always shows at least 80 % of the picture width. Below 8 px the page
 keeps 8 px tiles and scrolls sideways. The page keeps the choice in `localStorage`.
 
-URL parameters: `nations` (comma list), `speed` (targets per worker call, default 8) and
+URL parameters: `nations` (comma list), `speed` (targets that a compute worker holds at once:
+one runs and the others wait; 1 to 8, default 2; the manager uses 2 for other values) and
 `hover` (unit id to pin a tooltip once the queue is done).
 
 ### Command line
@@ -109,20 +117,28 @@ prints the result JSON that the page shows.
   of github.com/maxsupermanhd/wrpl-inspector. `game/data.go` gives the BLK reader each
   container's name map and a zstd decoder with the container's dictionary, and turns int
   values into float64, as in the datamine's `.blkx` JSON.
-- `geom/` reads GRP2 resource packs and the collision resources in them (the compressed
-  "v3" format with a quantised tree per node, and the older plain one), and builds a BVH.
+- `grp/` reads GRP2 resource packs and the collision resources in them (the compressed
+  "v3" format with a quantised tree per node, and the older plain one).
+- `geom/` holds the collision nodes and builds a BVH that traces rays through them.
+- `dm/` holds the data that the simulation reads: vehicles, damage parts, crew, racks, shells
+  and the global tables. It has no loaders.
 - `game/` loads units (RB BR and rank from `wpcost.blk`, role from `unittags.blk`, names
   from `units.csv`), damage parts, crew, ammo racks, shells, the damage model tables and the
-  collision nodes, from either source. `game/shop.go` lays out the trees
+  collision nodes, from either source, into the `dm` types. `game/shop.go` lays out the trees
   (see below).
-- `sim/` is the simulation behind the `Simulator` interface.
-- `cmd/wasm` exposes `shotdb.open(readFile, readRange, listDir)`, `shotdb.rounds(shooter)` and
-  `shotdb.simulate(shooter, target, round)` to JS. `round` -1 fires every round and keeps the best.
-- `web/` holds the page sources: `index.html`, `style.css` and `src/`. `src/worker.ts` runs
-  the wasm and reads the chosen folder. `src/app.ts` is the page, the worker pool, the queue and the
-  remembered folder. `src/types.ts` has the shapes of the wasm JSON and of the worker
-  messages. `src/wasm.d.ts` and `src/fs-access.d.ts` declare the wasm API and the parts of
-  the File System Access API that the TypeScript DOM types do not have.
+- `sim/` is the simulation: `sim.Rounds(tables, shooter)` and
+  `sim.Simulate(tables, shooter, target, nodes, round)`. It imports only `dm` and `geom`.
+- `packet/` encodes what the manager sends to the compute workers (see [Workers](#workers)).
+- `cmd/manager` is the manager's wasm. Its doc comment lists the messages of the page.
+- `cmd/compute` is the compute workers' wasm: `compute.tables(packet)`,
+  `compute.shooter(packet, round)` and `compute.simulate(packet)`. `round` -1 fires every
+  round and keeps the best. It imports no `game`, `grp`, zstd, BLK or vromfs code.
+- `web/` holds the page sources: `index.html`, `style.css` and `src/`. `src/manager.ts` runs
+  the manager's wasm and reads the chosen folder. `src/compute.ts` runs the compute wasm.
+  `src/app.ts` is the page, the pool of compute workers and the remembered folder. It draws
+  and passes the user's actions to the manager. `src/types.ts` has the shapes of the JSON and
+  of the worker messages. `src/wasm.d.ts` and `src/fs-access.d.ts` declare the wasm APIs and
+  the parts of the File System Access API that the TypeScript DOM types do not have.
 - `cmd/build` bundles `web/` into `dist/` with esbuild.
 - `cmd/serve` serves `dist/` as static files over HTTPS.
 
@@ -240,6 +256,31 @@ Approximated, and why:
   "ricochet" when the shell bounced and did nothing inside; else "no pen". Score per view:
   `(kills + 0.4 x (pens + shatters)) / lines`; card score: front 0.5, side 0.3, rear 0.2.
 
+## Workers
+
+The page runs two wasm binaries, each in its own kind of Web Worker.
+
+- **The manager** (`manager.wasm`, one worker) reads all game files: the containers, the BLK
+  files, the language files, the trees, the tank packs, and it loads the vehicles. It also
+  runs the queue: the order outwards from the shooter's BR, the forced round, the pause, the
+  changes of shooter and round, and a queue number that drops the answers of an old queue. It
+  gives the targets to the compute workers and collects the results.
+- **The compute workers** (`compute.wasm`) read no files. Each one gets the global tables
+  once per open (28 KB), the shooter once per queue, and then one packet per target: the
+  target's damage parts, crew and racks, and its collision nodes (0.24 MB on average, 0.61 MB
+  at most). The manager keeps two targets in each worker: one runs and the next waits, so that
+  a worker does not wait for the manager.
+
+The manager sends each packet as a transferable ArrayBuffer over a MessageChannel straight
+to the compute worker. The page only makes the channels. A packet takes one copy out of Go,
+no copy on the way and one copy into Go. Package `packet` encodes the packets with
+encoding/gob, which keeps every float64 exact, also +Inf.
+
+The manager does the work that does not depend on the shooter once per open: the game data,
+the packet of the tables and the list of targets. It keeps the last 32 loaded units. It keeps
+no target packets for the next queue: such a cache stays in wasm memory, which never shrinks,
+and up to 8 workers the manager is not the bottleneck (see below).
+
 ## Speed
 
 Measured on the 2.61.0.37 install:
@@ -253,21 +294,48 @@ Measured on the 2.61.0.37 install:
   T-90A 1.1 s; WWII pairs 0.43 to 0.56 s. Wasm runs about 3.4 times slower than native.
 
 The cost is mostly the shot lines (48 to 64 per view and round) and the fragment rays behind
-each perforation. A prepared target (mesh, BVH, lines) is kept for the last 4 targets, and a
-loaded unit for the last 32 units. A mesh takes a few MB, and a queue fires at each target once.
+each perforation. A compute worker builds the mesh, the BVH and the lines of each target, and
+keeps them only while it fires at it. A queue fires at each target once.
+
+In the page with the manager and the compute workers, on the 2.61.0.42 install (headless
+Chromium, 16 CPU threads, the M4A2 queue of 1254 targets). "Before" is the design with one
+wasm per worker that each read the game files. The time of a pair now counts the decode of
+the packet in the compute worker, and no longer the load of the target.
+
+| compute workers | before: wall time, ms a pair | now: wall time, ms a pair |
+| --- | --- | --- |
+| 4 | 162 s, 504 ms | 163 s, 511 ms |
+| 8 | 86 s, 531 ms | 87 s, 540 ms |
+| 16 | 72 s, 886 ms | 73 s, 889 ms |
+
+The manager prepares a target in 41 ms with 8 compute workers (17.7 ms to load the unit,
+10.8 ms to read and parse the collision resource, 12.5 ms to encode the packet), and in 56 ms
+with 16, as the threads are busier. With 8 workers it is busy 59 % of the time, and no worker
+waits for a target. With 16 workers it is busy 95 % of the time, workers wait 256 times in a
+queue, and the queue takes 2 % longer than before.
 
 ## Memory
 
-Wasm memory never shrinks, so the peak sets the size of each worker. On the 2.61.0.37 install
-one worker takes about 210 MB of wasm memory, from open to the end of a full queue (headless
-Chromium, four workers, the M4A2 queue of 1263 targets). The peak comes from `open`: the
-containers unpack one at a time, and the parse of `char.vromfs.bin/config/wpcost.blk` makes a
-tree of about 90 MB for a short time. After `open` a worker keeps about 25 MB of game data:
-the name maps, the `lang` names and the files of `aces.vromfs.bin` that the simulation reads.
+Wasm memory never shrinks, so the peak sets the size of each worker. On the 2.61.0.42 install,
+from open to the end of the M4A2 queue (headless Chromium):
+
+| compute workers | before | now |
+| --- | --- | --- |
+| 4 | 801 MB | 313 MB |
+| 8 | 1604 MB | 430 MB |
+| 16 | 3205 MB | 636 MB |
+
+Before, each worker took about 200 MB. Now the manager takes about 200 MB and each compute
+worker 25 to 33 MB. The peak of the manager comes from `open`: the containers unpack one at a
+time, and the parse of `char.vromfs.bin/config/wpcost.blk` makes a tree of about 90 MB for a
+short time. After `open` the manager keeps about 25 MB of game data: the name maps, the `lang`
+names and the files of `aces.vromfs.bin` that the simulation reads. A compute worker keeps the
+tables, the shooter, and the packet, the mesh and the BVH of the target that it fires at.
+`compute.wasm` is 5.1 MB, `manager.wasm` 6.9 MB.
 
 ## Checks
 
-    go vet ./... && GOOS=js GOARCH=wasm go vet ./geom/... ./game/... ./sim/... ./cmd/wasm
+    go vet ./... && GOOS=js GOARCH=wasm go vet ./...
     go test ./...
 
 ## License

@@ -1,5 +1,5 @@
 {
   "extends": "./tsconfig.base.json",
   "compilerOptions": { "lib": ["ES2022", "WebWorker", "WebWorker.AsyncIterable"] },
-  "files": ["web/src/worker.ts", "web/src/fs-access.d.ts", "web/src/wasm.d.ts"]
+  "files": ["web/src/manager.ts", "web/src/compute.ts", "web/src/fs-access.d.ts", "web/src/wasm.d.ts"]
 }

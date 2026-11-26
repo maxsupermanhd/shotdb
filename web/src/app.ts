@@ -1,5 +1,7 @@
-// Tech trees and names from the opened game data, unit icons from the wiki's static content; shot results from the Go simulation (shotdb.wasm) in a pool of workers.
-import type { Card, Grid, Outcome, Plate, Replies, Reply, Request, Rounds, Source, TargetResult, Tree, Unit } from "./types";
+// Tech trees and names from the opened game data, unit icons from the wiki's static content; shot results from the Go simulation.
+// The manager worker (manager.wasm) reads the game files and runs the queue. It hands the targets to a pool of compute
+// workers (compute.wasm) over MessagePorts. The page only draws and passes the user's actions to the manager.
+import type { Card, FromManager, GameInfo, Grid, Outcome, Plate, Progress, Rounds, Source, TargetResult, ToManager, Tree, Unit } from "./types";
 
 const RANKS = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"];
 const OUTCOMES: Outcome[] = ["kill", "pen", "shatter", "ricochet", "nonpen"];
@@ -11,18 +13,15 @@ const nationsParam = params.get("nations");
 const state = {
   shooter: "", // none until the user picks one
   nations: nationsParam ? new Set(nationsParam.split(",")) : null as Set<string> | null, // null: all
-  speed: Number(params.get("speed") ?? 8), // targets per worker call
   game: new Map<string, Unit>(), // from the opened game data
   results: new Map<string, TargetResult>(),
   rounds: null as Rounds | null, // of the shooter
   round: -1, // the only round to fire, or -1 for the best of all
-  wins: [] as number[], // targets per round that the round was best on
-  queue: [] as string[],
-  done: 0,
-  next: 0, // queue index of the next batch to give to a worker
-  ms: 0, // simulation time of the done pairs
-  gen: 0, // bumps on every queue restart; stale worker replies are dropped
-  paused: false, // workers take no new batch
+  queue: [] as string[], // in the manager's order
+  started: new Set<string>(), // targets that a compute worker holds
+  gen: 0, // the manager's queue; messages of other queues are dropped
+  progress: { done: 0, total: 0, running: 0, ms: 0, paused: false, wins: null } as Progress,
+  stopped: "", // why the queue stopped, when the manager failed
   byLabel: new Map<string, string>(),
 };
 
@@ -31,25 +30,17 @@ const $ = <T extends HTMLElement = HTMLElement>(s: string) => document.querySele
 const clean = (name: string) => name.replace(/[␀-◿-]/g, "").trim();
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
-type Body<R> = R extends unknown ? Omit<R, "id"> : never;
-type Call = { resolve: (r: Replies[keyof Replies]) => void; reject: (e: Error) => void };
+const manager = new Worker(new URL("./manager.js", import.meta.url), { type: "module" });
+const tell = (msg: ToManager, transfer: Transferable[] = []) => manager.postMessage(msg, transfer);
+manager.onmessage = ({ data }: MessageEvent<string>) => onManager(JSON.parse(data));
+manager.onerror = (e) => managerFailed(e.message || "the manager did not load");
+// speed: targets that a compute worker holds at once, one runs and the others wait; the manager keeps 2 for a bad value
+tell({ op: "hold", n: Number(params.get("speed") ?? 2) });
 
-// Each worker runs its own wasm with its own copy of the game data. They share one queue.
-type Peer = {
-  worker: Worker;
-  calls: Map<number, Call>;
-  opened: Promise<Replies["open"]> | null; // the open call for the current source
-  retire: boolean; // terminate after the call in flight
-  draining: number; // the queue generation that the worker takes batches from, 0 for none
-};
+// Each compute worker keeps the tables, the shooter and the target that it runs, and nothing more.
+type Peer = { id: number; worker: Worker };
 const pool: Peer[] = [];
-let source: Source | null = null; // the open game folder, for workers that start later
-let callId = 0;
-const call = <K extends keyof Replies>(peer: Peer, msg: Extract<Body<Request>, { op: K }>) => new Promise<Replies[K]>((resolve, reject) => {
-  const id = ++callId;
-  peer.calls.set(id, { resolve: resolve as Call["resolve"], reject });
-  peer.worker.postMessage({ ...msg, id });
-});
+let peerId = 0;
 const cores = navigator.hardwareConcurrency || 2;
 setupWorkers();
 
@@ -68,7 +59,7 @@ setupCompact();
 setupPicker();
 setupOpen();
 
-// Default: half of the cores, at most 8, as each worker keeps the game data and a mesh cache.
+// Default: half of the cores, at most 8.
 function setupWorkers() {
   const select = $<HTMLSelectElement>("#workers");
   for (let n = 1; n <= cores; n++) select.add(new Option(String(n)));
@@ -81,26 +72,96 @@ function setupWorkers() {
   setWorkers(Number(select.value));
 }
 
+// A dropped worker stops at once: the manager puts its targets back in the queue.
 function setWorkers(n: number) {
   while (pool.length > n) {
     const peer = pool.pop()!;
-    peer.retire = true;
-    if (!peer.calls.size) peer.worker.terminate();
+    tell({ op: "drop", id: peer.id });
+    peer.worker.terminate();
   }
   while (pool.length < n) {
-    const peer: Peer = { worker: new Worker(new URL("./worker.js", import.meta.url), { type: "module" }), calls: new Map(), opened: null, retire: false, draining: 0 };
-    peer.worker.onmessage = ({ data }: MessageEvent<Reply>) => {
-      const c = peer.calls.get(data.id)!;
-      peer.calls.delete(data.id);
-      "error" in data ? c.reject(new Error(data.error)) : c.resolve(data);
-      if (peer.retire && !peer.calls.size) peer.worker.terminate();
+    const id = ++peerId;
+    const worker = new Worker(new URL("./compute.js", import.meta.url), { type: "module" });
+    const { port1, port2 } = new MessageChannel();
+    worker.postMessage({ port: port2 }, [port2]);
+    tell({ op: "worker", id, port: port1 }, [port1]);
+    const fail = (error: string) => {
+      const i = pool.findIndex((p) => p.id === id);
+      if (i < 0) return;
+      pool.splice(i, 1);
+      worker.terminate();
+      tell({ op: "failed", id, error });
+      setStatus(`A compute worker failed: ${error}. ${pool.length} left.`, true);
     };
-    peer.worker.onerror = (e) => setStatus(`Worker failed: ${e.message}`, true);
-    pool.push(peer);
-    if (!source) continue;
-    peer.opened = call(peer, { op: "open", source });
-    if (state.rounds && !state.paused && state.next < state.queue.length) drain(peer, state.gen);
+    worker.onerror = (e) => {
+      e.preventDefault();
+      fail(e.message || "the worker did not load");
+    };
+    worker.onmessage = ({ data }: MessageEvent<{ op: "fatal"; error: string }>) => fail(data.error);
+    pool.push({ id, worker });
   }
+}
+
+let opened: ((r: { info?: GameInfo; error?: string }) => void) | null = null;
+let pinned = false; // the hover parameter's tooltip is shown
+let managerDown = false;
+
+function onManager(msg: FromManager) {
+  switch (msg.op) {
+    case "opened":
+      opened?.(msg);
+      opened = null;
+      return;
+    case "error":
+      return setStatus(msg.error, true);
+    case "fatal":
+      return managerFailed(msg.error);
+    case "queue":
+      return newQueue(msg);
+  }
+  if (msg.gen !== state.gen) return;
+  switch (msg.op) {
+    case "start":
+      state.started.add(msg.target);
+      cards.get(msg.target)?.forEach((el) => el.classList.add("running"));
+      break;
+    case "back":
+      for (const id of msg.targets) {
+        state.started.delete(id);
+        cards.get(id)?.forEach((el) => el.classList.remove("running"));
+      }
+      break;
+    case "result":
+      state.started.delete(msg.target);
+      state.results.set(msg.target, "result" in msg ? msg.result : { target: msg.target, error: msg.error });
+      paint(msg.target);
+      break;
+    case "progress": {
+      const { op: _op, gen: _gen, ...p } = msg;
+      state.progress = p;
+      document.querySelectorAll<HTMLElement>("#rounds .r-wins").forEach((el, i) => (el.textContent = String(p.wins?.[i] ?? 0)));
+      progress();
+      if (p.total && p.done >= p.total && !pinned) pinHover();
+      break;
+    }
+  }
+}
+
+// The manager failed: the targets that it gave out get no result, so they fail here.
+function managerFailed(error: string) {
+  if (managerDown) return;
+  managerDown = true;
+  manager.terminate();
+  opened?.({ error: `The manager failed: ${error}` });
+  opened = null;
+  setStatus(`The manager failed: ${error}`, true);
+  state.stopped = error;
+  for (const id of state.started) {
+    state.results.set(id, { target: id, error: `the manager failed: ${error}` });
+    paint(id);
+  }
+  state.started.clear();
+  progress();
 }
 
 function setupTrees() {
@@ -124,15 +185,9 @@ function setupTrees() {
   $("#rounds").addEventListener("click", (e) => {
     const row = (e.target as Element).closest<HTMLElement>(".round");
     if (!row) return;
-    const i = Number(row.dataset.index);
-    state.round = state.round === i ? -1 : i;
-    restartQueue();
+    tell({ op: "round", index: Number(row.dataset.index) });
   });
-  $("#pause").addEventListener("click", () => {
-    state.paused = !state.paused;
-    if (!state.paused) pool.forEach((peer) => drain(peer, state.gen));
-    progress();
-  });
+  $("#pause").addEventListener("click", () => tell({ op: "pause" }));
   main.innerHTML = `<p class="empty">Open the War Thunder install folder to show the research trees.</p>`;
   $("#progress-text").textContent = "Open a game folder to run the shots";
 }
@@ -451,26 +506,23 @@ async function openSource(src: Source, label: string) {
   const open = $<HTMLButtonElement>("#open");
   open.disabled = true;
   setStatus(`Loading ${label}…`);
-  source = src;
-  state.gen++; // the running queue stops
-  for (const peer of pool) peer.opened = call(peer, { op: "open", source });
-  try {
-    const [{ info }] = await Promise.all(pool.map((p) => p.opened!));
-    state.game = new Map(info.units.map((u) => [u.id, { ...u, name: clean(u.name) }]));
-    trees = info.trees;
-    render();
-    const inTree = [...cards.keys()].filter((id) => state.game.has(id)).length;
-    setStatus(`${label} · ${info.source}${info.version ? ` ${info.version}` : ""} · ${inTree} vehicles`);
-    fillPicker();
-    // a shooter that the user picked before stays, if the new data has it
-    shootable(state.shooter) ? selectShooter(state.shooter) : noShooter();
-    return true;
-  } catch (err) {
-    setStatus(message(err), true);
+  opened?.({ error: "another folder was picked" });
+  const { info, error } = await new Promise<{ info?: GameInfo; error?: string }>((resolve) => {
+    opened = resolve;
+    tell({ op: "open", source: src });
+  });
+  open.disabled = false;
+  if (!info) {
+    setStatus(error!, true);
     return false;
-  } finally {
-    open.disabled = false;
   }
+  state.game = new Map(info.units.map((u) => [u.id, { ...u, name: clean(u.name) }]));
+  trees = info.trees;
+  render();
+  const inTree = [...cards.keys()].filter((id) => state.game.has(id)).length;
+  setStatus(`${label} · ${info.source}${info.version ? ` ${info.version}` : ""} · ${inTree} vehicles`);
+  fillPicker();
+  return true; // the manager keeps the shooter that the user picked before, if the new data has it
 }
 
 function setStatus(text: string, error = false) {
@@ -502,29 +554,7 @@ function shootable(id: string) {
 }
 
 function selectShooter(id: string) {
-  if (id !== state.shooter) state.round = -1;
-  state.shooter = id;
-  $<HTMLInputElement>("#shooter").value = pickerLabel(id);
-  shooterInfo();
-  document.querySelectorAll(".card.shooter").forEach((el) => el.classList.remove("shooter"));
-  cards.get(id)?.forEach((el) => el.classList.add("shooter"));
-  $("#trees").classList.remove("idle");
-  restartQueue();
-}
-
-function noShooter() {
-  state.shooter = "";
-  state.round = -1;
-  state.gen++; // a running queue stops
-  state.queue = [];
-  state.done = state.next = state.ms = 0;
-  state.results.clear();
-  state.rounds = null;
-  $<HTMLInputElement>("#shooter").value = "";
-  $("#shooter-info").textContent = "type a name or click any card to shoot with it";
-  $("#trees").classList.add("idle");
-  roundsPanel();
-  progress();
+  tell({ op: "shooter", id });
 }
 
 function shooterInfo(note = "") {
@@ -532,16 +562,18 @@ function shooterInfo(note = "") {
   $("#shooter-info").textContent = `${s.role}${s.rank ? ` · Rank ${RANKS[s.rank - 1]}` : ""} · BR ${s.br.toFixed(1)} · ${note || "click any card to shoot with it"}`;
 }
 
-// Outwards from the shooter's BR: by distance, the higher BR first on ties.
-async function restartQueue() {
-  const gen = ++state.gen;
-  state.paused = false; // a new shooter or round starts its queue at once
+// A new queue of the manager: outwards from the shooter's BR, or none when no shooter is picked.
+function newQueue(q: Extract<FromManager, { op: "queue" }>) {
+  state.gen = q.gen;
+  state.shooter = q.shooter;
+  state.round = q.round ?? -1;
+  state.rounds = q.rounds ? { range: q.range!, rounds: q.rounds } : null;
+  state.queue = q.targets ?? [];
+  state.started.clear();
   state.results.clear();
-  state.done = 0;
-  state.next = 0;
-  state.ms = 0;
-  state.rounds = null;
-  roundsPanel();
+  state.progress = { done: 0, total: state.queue.length, running: 0, ms: 0, paused: false, wins: null };
+  state.stopped = "";
+  pinned = false;
   for (const els of cards.values()) {
     els.forEach((el) => {
       el.classList.remove("running", "done", "void");
@@ -549,79 +581,31 @@ async function restartQueue() {
       el.querySelectorAll<HTMLElement>(".card-views i").forEach((i) => i.style.removeProperty("background"));
     });
   }
-  const sbr = br(state.shooter);
-  state.queue = [...cards.keys()].filter(shootable).sort((a, b) => {
-    const da = br(a) - sbr, db = br(b) - sbr;
-    return Math.abs(da) - Math.abs(db) || db - da || a.localeCompare(b);
-  });
-  progress();
-  try {
-    await pool[0].opened;
-    const { rounds } = await call(pool[0], { op: "rounds", shooter: state.shooter });
-    if (gen !== state.gen) return;
-    state.rounds = rounds;
-  } catch (err) {
-    if (gen === state.gen) $("#rounds").textContent = `Cannot read the rounds: ${message(err)}`;
-    return;
+  document.querySelectorAll(".card.shooter").forEach((el) => el.classList.remove("shooter"));
+  const input = $<HTMLInputElement>("#shooter");
+  if (!state.shooter) {
+    input.value = "";
+    $("#shooter-info").textContent = "type a name or click any card to shoot with it";
+    $("#trees").classList.add("idle");
+  } else {
+    input.value = pickerLabel(state.shooter);
+    shooterInfo(state.rounds && !state.rounds.rounds.length ? "no gun of 20 mm or more that attacks armour" : "");
+    cards.get(state.shooter)?.forEach((el) => el.classList.add("shooter"));
+    $("#trees").classList.remove("idle");
   }
-  if (state.round >= state.rounds.rounds.length) state.round = -1;
-  state.wins = state.rounds.rounds.map(() => 0);
   roundsPanel();
-  if (!state.rounds.rounds.length) shooterInfo("no gun of 20 mm or more that attacks armour");
-  pool.forEach((peer) => drain(peer, gen));
+  if (q.error) $("#rounds").textContent = `Cannot read the rounds: ${q.error}`;
+  progress();
 }
 
-// drain gives the next batch of the queue to the worker until the queue is empty.
-async function drain(peer: Peer, gen: number) {
-  if (peer.draining === gen) return; // the worker still runs its batch of this queue
-  peer.draining = gen;
-  try {
-    await drainQueue(peer, gen);
-  } finally {
-    if (peer.draining === gen) peer.draining = 0;
-  }
-}
-
-async function drainQueue(peer: Peer, gen: number) {
-  try {
-    await peer.opened;
-  } catch {
-    return; // openSource shows the error
-  }
-  while (gen === state.gen && !peer.retire && !state.paused && state.next < state.queue.length) {
-    const batch = state.queue.slice(state.next, state.next + state.speed);
-    state.next += batch.length;
-    batch.forEach((id) => cards.get(id)!.forEach((el) => el.classList.add("running")));
-    let results: TargetResult[];
-    try {
-      ({ results } = await call(peer, { op: "sim", shooter: state.shooter, targets: batch, round: state.round }));
-    } catch (err) {
-      if (gen === state.gen) {
-        state.next = state.queue.length;
-        $("#progress-text").textContent = `Stopped: ${message(err)}`;
-      }
-      return;
-    }
-    if (gen !== state.gen) return;
-    for (const r of results) {
-      state.results.set(r.target, r);
-      if ("error" in r) continue;
-      state.ms += r.ms;
-      if (r.shell) state.wins[r.shell.index]++;
-    }
-    document.querySelectorAll<HTMLElement>("#rounds .r-wins").forEach((el, i) => (el.textContent = String(state.wins[i])));
-    batch.forEach(paint);
-    state.done += batch.length;
-    progress();
-  }
-  // a retired worker leaves its part of the queue to the others
-  if (gen !== state.gen || state.done < state.queue.length) return;
+// Once the queue is done, the tooltip of the hover parameter's unit stays on.
+function pinHover() {
+  pinned = true;
   const pin = params.get("hover");
-  const pinned = pin ? cards.get(pin) : undefined;
-  if (pinned) {
-    pinned[0].scrollIntoView({ block: "center", inline: "center" });
-    showTooltip(pinned[0], true);
-  }
+  const els = pin ? cards.get(pin) : undefined;
+  if (!els) return;
+  els[0].scrollIntoView({ block: "center", inline: "center" });
+  showTooltip(els[0], true);
 }
 
 // The shooter's rounds at the range: click one to fire only it, click it again for the best of all.
@@ -650,7 +634,7 @@ function roundsPanel() {
     const filler = s.filler ? `${+(s.filler * 1000).toFixed(1)} g ${esc(s.explosive.replaceAll("_", " "))}` : "";
     return g + `<tr class="round${i === state.round ? " forced" : ""}" data-index="${i}"><td title="${esc(s.name)}">${esc(s.name)}</td>`
       + `<td>${shellType(s.type)}</td><td>${+s.caliber.toFixed(1)} mm</td><td>${mass}</td><td>${s.speed} m/s</td>`
-      + `<td>${Math.round(s.pen)} mm</td><td>${filler}</td><td class="r-wins">${state.wins[i] ?? 0}</td></tr>`;
+      + `<td>${Math.round(s.pen)} mm</td><td>${filler}</td><td class="r-wins">${state.progress.wins?.[i] ?? 0}</td></tr>`;
   }).join("");
   panel.innerHTML = `<div class="rounds-head">${head}</div><div class="rounds-list"><table>`
     + `<tr><th></th><th>type</th><th>calibre</th><th>mass</th><th>muzzle</th><th title="flat penetration at ${r.range} m">pen</th><th>filler</th><th title="targets this round was best on">best</th></tr>`
@@ -667,20 +651,23 @@ function hideTip() {
 }
 
 function progress() {
-  const total = state.queue.length;
+  const { done, total, running, ms, paused, at } = state.progress;
   const pause = $<HTMLButtonElement>("#pause");
-  pause.disabled = state.done >= total;
-  pause.textContent = state.paused ? "Resume" : "Pause";
-  $("#progress-fill").style.width = `${total ? (100 * state.done) / total : 0}%`;
-  if (!total) {
-    $("#progress-text").textContent = "Pick a shooter to run the shots";
+  pause.disabled = done >= total || !!state.stopped;
+  pause.textContent = paused ? "Resume" : "Pause";
+  $("#progress-fill").style.width = `${total ? (100 * done) / total : 0}%`;
+  const text = $("#progress-text");
+  if (state.stopped) {
+    text.textContent = `Stopped: ${state.stopped}`;
     return;
   }
-  const next = state.queue[state.next];
-  const avg = state.done ? ` · ${Math.round(state.ms / state.done)} ms a pair` : "";
-  const running = state.next - state.done; // targets in the batches that the workers run
-  const where = state.paused ? ` · paused${running ? `, ${running} still running` : ""}` : next ? ` · now at BR ${br(next).toFixed(1)}` : "";
-  $("#progress-text").textContent = state.done < total ? `${state.done} / ${total}${where}${avg}` : `${total} / ${total} done${avg}`;
+  if (!total) {
+    text.textContent = "Pick a shooter to run the shots";
+    return;
+  }
+  const avg = done ? ` · ${Math.round(ms / done)} ms a pair` : "";
+  const where = paused ? ` · paused${running ? `, ${running} still running` : ""}` : at !== undefined ? ` · now at BR ${at.toFixed(1)}` : "";
+  text.textContent = done < total ? `${done} / ${total}${where}${avg}` : `${total} / ${total} done${avg}`;
 }
 
 function paint(id: string) {
@@ -722,9 +709,12 @@ function showTooltip(el: HTMLElement, pinned = false) {
     body = `<div class="tt-pending">Not in the opened game data, not simulated</div>`;
   } else if (!state.shooter) {
     body = `<div class="tt-pending">No shooter picked. Click the card to shoot with it.</div>`;
+  } else if (state.started.has(id)) {
+    body = `<div class="tt-pending">Running now</div>`;
   } else if (!res) {
-    const ahead = state.queue.indexOf(id) - state.next;
-    body = `<div class="tt-pending">${ahead < 0 ? "Running now" : `Queued: ${ahead} ahead in line${state.paused ? " (paused)" : ""}`}</div>`;
+    const at = state.queue.indexOf(id);
+    const ahead = state.queue.slice(0, Math.max(0, at)).filter((t) => !state.started.has(t) && !state.results.has(t)).length;
+    body = `<div class="tt-pending">Queued: ${ahead} ahead in line${state.progress.paused ? " (paused)" : ""}</div>`;
   } else if ("error" in res) {
     body = `<div class="tt-pending">Failed: ${esc(res.error)}</div>`;
   } else if (!res.shell) {

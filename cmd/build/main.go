@@ -1,6 +1,6 @@
 // Command build bundles the page in web/ into dist/ with esbuild. It does not
-// check types: esbuild only strips them. build.sh puts shotdb.wasm and
-// wasm_exec.js into dist/ first.
+// check types: esbuild only strips them. build.sh puts manager.wasm,
+// compute.wasm and wasm_exec.js into dist/ first.
 package main
 
 import (
@@ -25,11 +25,12 @@ func main() {
 }
 
 func build(out string, minify bool) error {
-	// app.ts starts the worker as new URL("./worker.js", import.meta.url), so the names must stay fixed.
+	// app.ts starts the workers as new URL("./manager.js", import.meta.url) and "./compute.js", so the names must stay fixed.
 	r := api.Build(api.BuildOptions{
 		EntryPointsAdvanced: []api.EntryPoint{
 			{InputPath: "web/src/app.ts", OutputPath: "app"},
-			{InputPath: "web/src/worker.ts", OutputPath: "worker"},
+			{InputPath: "web/src/manager.ts", OutputPath: "manager"},
+			{InputPath: "web/src/compute.ts", OutputPath: "compute"},
 			{InputPath: "web/style.css", OutputPath: "style"},
 		},
 		Outdir:            out,

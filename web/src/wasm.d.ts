@@ -1,4 +1,4 @@
-// The Go runtime from wasm_exec.js and the API that cmd/wasm sets on globalThis.
+// The Go runtime from wasm_exec.js and the APIs that cmd/manager and cmd/compute set on globalThis.
 
 declare class Go {
   importObject: WebAssembly.Imports;
@@ -10,11 +10,15 @@ type ReadFile = (path: string) => Promise<Uint8Array | null>;
 type ReadRange = (path: string, offset: number, length: number) => Promise<Uint8Array | null>;
 type ListDir = (path: string) => Promise<string[] | null>;
 
-declare var shotdb: {
-  // JSON of a GameInfo
-  open(readFile: ReadFile, readRange: ReadRange, listDir: ListDir): Promise<string>;
-  // JSON of a Rounds
-  rounds(shooter: string): Promise<string>;
-  // JSON of a SimResult; round -1 fires every round and keeps the best
-  simulate(shooter: string, target: string, round: number): Promise<string>;
+declare var manager: {
+  start(readFile: ReadFile, readRange: ReadRange, listDir: ListDir, useSource: (source: import("./types").Source) => void): void;
+  message(msg: import("./types").ToManager): void;
+};
+
+// Each gives an error message, "" if none.
+declare var compute: {
+  tables(packet: Uint8Array): string;
+  shooter(packet: Uint8Array, round: number): string; // round -1: the best of all
+  // JSON of a SimResult or a SimError
+  simulate(packet: Uint8Array): string;
 };

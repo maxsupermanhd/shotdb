@@ -1,17 +1,20 @@
-// Runs the Go simulation (shotdb.wasm) off the page's thread.
-// shotdb.wasm and wasm_exec.js sit next to the bundled worker in dist/.
-import type { Reply, Request, Source, TargetResult } from "./types";
+// Runs the manager (manager.wasm): it reads the chosen folder and runs the shot queue.
+// The page sends it the user's actions and a MessagePort to each compute worker.
+// manager.wasm and wasm_exec.js sit next to the bundled worker in dist/.
+import type { Source, ToManager } from "./types";
 
 declare const self: DedicatedWorkerGlobalScope;
 
-const ready = import(new URL("wasm_exec.js", self.location.href).href).then(async () => {
-  const go = new Go();
-  const { instance } = await WebAssembly.instantiateStreaming(fetch("shotdb.wasm"), go.importObject);
-  void go.run(instance);
-});
+const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
+const fatal = (error: string) => self.postMessage(JSON.stringify({ op: "fatal", error }));
 
 let source: Source | null = null;
 const dirs = new Map<string, FileSystemDirectoryHandle>(); // directory path -> handle
+
+function useSource(s: Source) {
+  source = s;
+  dirs.clear();
+}
 
 function missing(err: unknown): boolean {
   return err instanceof DOMException && (err.name === "NotFoundError" || err.name === "TypeMismatchError");
@@ -74,30 +77,20 @@ async function listDir(path: string): Promise<string[] | null> {
   }
 }
 
-const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
-const reply = (r: Reply) => self.postMessage(r);
+const ready = import(new URL("wasm_exec.js", self.location.href).href).then(async () => {
+  const go = new Go();
+  const { instance } = await WebAssembly.instantiateStreaming(fetch("manager.wasm"), go.importObject);
+  void go.run(instance).then(() => fatal("the manager stopped"));
+  manager.start(readFile, readRange, listDir, useSource);
+});
+ready.catch((err) => fatal(message(err)));
 
-self.onmessage = async ({ data: msg }: MessageEvent<Request>) => {
-  try {
-    await ready;
-    if (msg.op === "open") {
-      source = msg.source;
-      dirs.clear();
-      reply({ id: msg.id, info: JSON.parse(await shotdb.open(readFile, readRange, listDir)) });
-    } else if (msg.op === "rounds") {
-      reply({ id: msg.id, rounds: JSON.parse(await shotdb.rounds(msg.shooter)) });
-    } else {
-      const results: TargetResult[] = [];
-      for (const target of msg.targets) {
-        try {
-          results.push(JSON.parse(await shotdb.simulate(msg.shooter, target, msg.round)));
-        } catch (err) {
-          results.push({ target, error: message(err) });
-        }
-      }
-      reply({ id: msg.id, results });
+self.onmessage = ({ data }: MessageEvent<ToManager>) => {
+  void ready.then(() => {
+    try {
+      manager.message(data);
+    } catch (err) {
+      fatal(message(err));
     }
-  } catch (err) {
-    reply({ id: msg.id, error: message(err) });
-  }
+  });
 };

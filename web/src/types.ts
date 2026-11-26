@@ -1,4 +1,4 @@
-// Shapes of the JSON from cmd/wasm and of the worker messages.
+// Shapes of the JSON from the manager and of the worker messages.
 
 export interface Unit {
   id: string;
@@ -95,15 +95,48 @@ export type Source =
   | { kind: "handle"; handle: FileSystemDirectoryHandle }
   | { kind: "files"; files: Map<string, File> };
 
-export type Request =
-  | { id: number; op: "open"; source: Source }
-  | { id: number; op: "rounds"; shooter: string }
-  | { id: number; op: "sim"; shooter: string; targets: string[]; round: number }; // round -1: the best
+// Page -> manager. See cmd/manager.
+export type ToManager =
+  | { op: "open"; source: Source }
+  | { op: "shooter"; id: string }
+  | { op: "round"; index: number }
+  | { op: "pause" }
+  | { op: "hold"; n: number }
+  | { op: "worker"; id: number; port: MessagePort }
+  | { op: "drop"; id: number }
+  | { op: "failed"; id: number; error: string };
 
-export interface Replies {
-  open: { info: GameInfo };
-  rounds: { rounds: Rounds };
-  sim: { results: TargetResult[] };
+export interface Progress {
+  done: number;
+  total: number;
+  running: number; // targets that the compute workers hold
+  ms: number; // simulation time of the done targets
+  paused: boolean;
+  at?: number; // BR of the next target
+  wins: number[] | null; // targets per round that the round was best on
 }
 
-export type Reply = { id: number } & ({ error: string } | Replies["open"] | Replies["rounds"] | Replies["sim"]);
+// Manager -> page, as JSON strings. gen is the queue that the message is about.
+export type FromManager =
+  | { op: "opened"; info?: GameInfo; error?: string }
+  | { op: "queue"; gen: number; shooter: string; error?: string; round?: number; range?: number; rounds?: Shell[]; targets?: string[] }
+  | { op: "start"; gen: number; target: string }
+  | { op: "back"; gen: number; targets: string[] } // targets that went back in the queue
+  | ({ op: "result"; gen: number; target: string } & ({ result: SimResult } | { error: string }))
+  | ({ op: "progress"; gen: number } & Progress)
+  | { op: "error"; error: string }
+  | { op: "fatal"; error: string };
+
+// Manager -> compute worker, over its port. buf is a packet of package packet.
+export type ToCompute =
+  | { op: "gen"; gen: number }
+  | { op: "tables"; buf: Uint8Array }
+  | { op: "shooter"; gen: number; round: number; buf: Uint8Array }
+  | { op: "target"; gen: number; target: string; buf: Uint8Array };
+
+// Compute worker -> manager: the JSON of a SimResult or a SimError, or no result when the target was skipped.
+export interface FromCompute {
+  gen: number;
+  target: string;
+  result?: string;
+}
