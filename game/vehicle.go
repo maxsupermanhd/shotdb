@@ -1,8 +1,11 @@
 package game
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 
@@ -486,8 +489,10 @@ func (d *Data) shells(t tree, v *Vehicle) error {
 					first = false
 				}
 				key := s.Name + "/" + s.Type
+				// Rounds of these types do not attack armour.
+				noArmour := slices.ContainsFunc([]string{"smoke", "sam", "aam", "football", "napalm", "sonic", "snowball", "practice"}, func(p string) bool { return strings.HasPrefix(s.Type, p) })
 				// 0.0199: a 20 mm calibre reads as 0.0199999 from the float32 files.
-				if s.Caliber < 0.0199 || seen[key] || !usable(s) {
+				if s.Caliber < 0.0199 || seen[key] || s.Type == "" || noArmour {
 					continue
 				}
 				seen[key] = true
@@ -529,23 +534,13 @@ func bullets(w tree) []tree {
 	return out
 }
 
-// usable drops rounds that do not attack armour.
-func usable(s Shell) bool {
-	for _, p := range []string{"smoke", "sam", "aam", "football", "napalm", "sonic", "snowball", "practice"} {
-		if strings.HasPrefix(s.Type, p) {
-			return false
-		}
-	}
-	return s.Type != ""
-}
-
 // projectile gives the shared defaults of a bullet type, once.
 func (d *Data) projectile(kind string) (tree, error) {
 	if t, ok := d.ptypes[kind]; ok {
 		return t, nil
 	}
 	t, err := d.blk("aces", "gamedata/damage_model/projectile_types/"+kind+".blk")
-	if err != nil && !isNotExist(err) {
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return nil, err
 	}
 	d.ptypes[kind] = t

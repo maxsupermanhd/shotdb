@@ -145,7 +145,14 @@ func (t *target) lines(bearings []float64) []sample {
 			u := normalize(cross(vec{0, 1, 0}, d))
 			w := cross(d, u)
 			umin, umax, wmin, wmax := math.Inf(1), math.Inf(-1), math.Inf(1), math.Inf(-1)
-			for _, c := range corners(t.mesh.Min, t.mesh.Max) {
+			for k := range 8 {
+				// Corner k of the bounding box: bit a of k picks the high side on axis a.
+				c := t.mesh.Min
+				for a := range 3 {
+					if k>>a&1 == 1 {
+						c[a] = t.mesh.Max[a]
+					}
+				}
 				r := sub(c, mid)
 				umin, umax = math.Min(umin, dot(r, u)), math.Max(umax, dot(r, u))
 				wmin, wmax = math.Min(wmin, dot(r, w)), math.Max(wmax, dot(r, w))
@@ -171,17 +178,6 @@ func (t *target) lines(bearings []float64) []sample {
 	return out
 }
 
-func corners(lo, hi vec) []vec {
-	var out []vec
-	for _, x := range []float64{lo[0], hi[0]} {
-		for _, y := range []float64{lo[1], hi[1]} {
-			for _, z := range []float64{lo[2], hi[2]} {
-				out = append(out, vec{x, y, z})
-			}
-		}
-	}
-	return out
-}
 
 func add(a, b vec) vec              { return vec{a[0] + b[0], a[1] + b[1], a[2] + b[2]} }
 func sub(a, b vec) vec              { return vec{a[0] - b[0], a[1] - b[1], a[2] - b[2]} }

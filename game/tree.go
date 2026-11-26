@@ -1,8 +1,6 @@
 package game
 
 import (
-	"errors"
-	"io/fs"
 	"slices"
 	"strings"
 )
@@ -137,5 +135,3 @@ func sortedKeys(m tree) []string {
 	slices.Sort(keys)
 	return keys
 }
-
-func isNotExist(err error) bool { return errors.Is(err, fs.ErrNotExist) }

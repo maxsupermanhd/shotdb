@@ -2,6 +2,7 @@ package sim
 
 import (
 	"math"
+	"slices"
 	"strings"
 
 	"shotdb/game"
@@ -11,11 +12,6 @@ import (
 type fate struct {
 	destroyed bool
 	interior  bool // a module inside the vehicle took damage
-}
-
-// exterior modules are hit from outside without a hole in the armour.
-func exterior(group, name string) bool {
-	return group == "gun" || group == "optics" || group == "commander_panoramic_sight" || strings.HasPrefix(name, "gun_barrel")
 }
 
 // resolve applies the shot's damage messages in order: hp, the onHit rule
@@ -63,7 +59,8 @@ func (s *shot) resolve() fate {
 		if dead[m.part] || p.HP <= 0 {
 			continue
 		}
-		if !exterior(p.Group, p.Name) {
+		// The gun, its barrel and the sights are hit from outside, with no hole in the armour.
+		if g := p.Group; !(g == "gun" || g == "optics" || g == "commander_panoramic_sight" || strings.HasPrefix(p.Name, "gun_barrel")) {
 			f.interior = true
 		}
 		left := math.Max(0, state(m.part)-m.amount)
@@ -71,7 +68,7 @@ func (s *shot) resolve() fate {
 		gate := math.Min(1, (1-left/p.HP)/math.Max(s.d.EffectThreshold, 1e-9))
 		// Warhead fragments take the explosion rules of a part that has none for shatter.
 		kind := m.kind
-		if kind == "shatter" && !anyRule(p.OnHit, "shatter") {
+		if kind == "shatter" && !slices.ContainsFunc(p.OnHit, func(r game.Rule) bool { return slices.Contains(r.Types, "shatter") }) {
 			kind = "explosion"
 		}
 		for _, r := range p.OnHit {
@@ -125,15 +122,4 @@ func (s *shot) resolve() fate {
 		f.destroyed = true
 	}
 	return f
-}
-
-func anyRule(rules []game.Rule, kind string) bool {
-	for _, r := range rules {
-		for _, t := range r.Types {
-			if t == kind {
-				return true
-			}
-		}
-	}
-	return false
 }
