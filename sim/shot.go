@@ -63,7 +63,8 @@ type fragment struct {
 	kind       string
 	weight     float64 // how many fragments the ray stands for
 	fire       float64
-	group      bool // the fragments hitting one part make one message, else one each
+	group      bool  // the fragments hitting one part make one message, else one each
+	from       int32 // the part that threw it, -1 for a warhead
 }
 
 func (s *shot) disperse(pen float64) float64 {
@@ -75,6 +76,16 @@ func (s *shot) chance(p float64) bool { return p > 0 && s.rng.Float64() < p }
 // meshCharged tells whether a crossing is charged by its chord.
 func (s *shot) meshCharged(i int32, sp span) bool {
 	return s.t.solid[i] && !s.t.parts[i].IgnoreSolid && (sp.out-sp.in)*1000 > 0.05
+}
+
+// exit is where a body leaves a crossing. The game looks for an exit face only
+// on solid nodes. A plain plate acts at its entry face: its node can be a closed
+// shell (a wheel, a track, an add-on box) whose far face lies well behind it.
+func (s *shot) exit(sp span) float64 {
+	if s.meshCharged(sp.part, sp) {
+		return sp.out
+	}
+	return sp.in
 }
 
 // charge is what a kinetic body pays for a crossing: the charge itself and the cost
@@ -185,7 +196,7 @@ func (s *shot) kinetic(o, d vec, spans []span, pen, speed float64, bounces int) 
 			pen = kineticPen(s.d, sh.Shell, kept, Range)
 		}
 		gap := sp.in - prevExit
-		prevExit = math.Max(prevExit, sp.out)
+		prevExit = math.Max(prevExit, s.exit(sp))
 		if s.broke && len(sh.BreakAir) > 0 {
 			pen *= game.Interp(sh.BreakAir, gap)
 		}
@@ -225,7 +236,7 @@ func (s *shot) kinetic(o, d vec, spans []span, pen, speed float64, bounces int) 
 			armed = sp.in
 		}
 		if p.Spall && residual > 0 && cost >= s.d.FragThin && pen <= cost*s.d.FragPierce {
-			s.cone(sh.Spall, along(o, d, sp.out), d, sp.n, residual, cost)
+			s.cone(sh.Spall, o, d, sp, residual, cost)
 		}
 		if !p.Module && sh.BreakMax > 0 && !s.broke && speed > sh.BreakSpeed {
 			thick := p.Thickness
@@ -346,11 +357,7 @@ func (s *shot) jet(o, d vec, spans []span, start float64) {
 		if !mesh {
 			cost = math.Max(charge, p.Through)
 		}
-		if mesh {
-			prev = math.Max(prev, sp.out)
-		} else {
-			prev = math.Max(prev, sp.in)
-		}
+		prev = math.Max(prev, s.exit(sp))
 		if p.Module {
 			s.hit(i, "cumulative", sh.CumDamage*pen/sh.Cumulative, 1)
 		}
@@ -362,17 +369,15 @@ func (s *shot) jet(o, d vec, spans []span, start float64) {
 			s.pierced = true
 		}
 		if p.Spall && sh.JetSpall != "" && pen > 0 {
-			at := sp.in
-			if mesh {
-				at = sp.out
-			}
-			s.cone(sh.JetSpall, along(o, d, at), d, sp.n, pen, cost)
+			s.cone(sh.JetSpall, o, d, sp, pen, cost)
 		}
 	}
 }
 
 // cone throws the secondary fragments of a perforated part from its exit point.
-func (s *shot) cone(preset string, at, d, n vec, residual, cost float64) {
+// The part does not charge its own fragments.
+func (s *shot) cone(preset string, o, d vec, sp span, residual, cost float64) {
+	at := along(o, d, s.exit(sp))
 	pr := s.d.Spall[preset]
 	if pr == nil {
 		pr = s.d.Spall["default"]
@@ -382,7 +387,7 @@ func (s *shot) cone(preset string, at, d, n vec, residual, cost float64) {
 	}
 	axis := d
 	if pr.ByNormal {
-		axis = scale(n, -1)
+		axis = scale(sp.n, -1)
 	}
 	cal := s.sh.DmgCal * 1000
 	var shellTotal, armorTotal float64
@@ -406,7 +411,7 @@ func (s *shot) cone(preset string, at, d, n vec, residual, cost float64) {
 		s.throw(math.Round(count), axis, at, sec.Inner, sec.Outer, fragment{
 			rng: sec.Distance, pen0: sec.Pen[1] * penMul, pen1: sec.Pen[0] * penMul,
 			dmg0: sec.Dmg[0] * dmgMul, dmg1: sec.Dmg[1] * dmgMul,
-			kind: "secondaryShatter", fire: sec.FireMult, group: sec.Aggregate,
+			kind: "secondaryShatter", fire: sec.FireMult, group: sec.Aggregate, from: sp.part,
 		})
 	}
 }
@@ -453,6 +458,9 @@ func (s *shot) fly(f fragment, agg []partDamage) []partDamage {
 	s.leaf = s.t.spans(f.o, f.d, f.rng, &s.hits, s.leaf[:0])
 	for _, sp := range s.leaf {
 		i := sp.part
+		if i == f.from {
+			continue
+		}
 		p := s.t.parts[i]
 		mech := f.kind
 		q := p.Q(mech)
@@ -528,12 +536,12 @@ func (s *shot) explode(at, d vec) {
 				cnt := math.Round(n * sh.Shatter.CountPortion * g.Portion)
 				s.throw(cnt, d, at, g.Inner, g.Outer, fragment{
 					rng: r * g.RadiusScale, pen0: p * g.PenScale, pen1: p * g.PenScale,
-					dmg0: dm * g.DmgScale, dmg1: dm * g.DmgScale, kind: "shatter", fire: 1,
+					dmg0: dm * g.DmgScale, dmg1: dm * g.DmgScale, kind: "shatter", fire: 1, from: -1,
 				})
 			}
 		} else {
 			// The statistical shatters of APHE: fragments in every direction from the burst.
-			s.throw(math.Round(n), d, at, 0, 180, fragment{rng: r, pen0: p, pen1: p, dmg0: dm, dmg1: dm, kind: "shatter", fire: 1})
+			s.throw(math.Round(n), d, at, 0, 180, fragment{rng: r, pen0: p, pen1: p, dmg0: dm, dmg1: dm, kind: "shatter", fire: 1, from: -1})
 		}
 	}
 

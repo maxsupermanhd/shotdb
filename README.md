@@ -175,8 +175,9 @@ From the game, as the game does it (formulas from the knowledge bank):
   broken core's loss in air gaps.
 - **Spall.** Cones from `secondary_shatter_presets.blk` behind each perforated plate, in
   both the residual-penetration and the mass mode, with the game's gates on thin plates and
-  overmatch. Each fragment's penetration falls off with distance and is charged by each part
-  it crosses.
+  overmatch. A cone starts at the exit face of a solid part and at the entry face of a plain
+  plate, whose node can be a closed shell. Each fragment's penetration falls off with
+  distance and is charged by each part it crosses, except the part that threw it.
 - **Damage and kills.** Each part's hp, its `onHit` rules (the strongest rule below the
   damage, gated by `partDamageEffectThreshold`) and `onKill` draws: fires, ammo explosions,
   fuel tank explosions, crew and module kills. The vehicle dies when fewer crew than
