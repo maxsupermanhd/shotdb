@@ -431,6 +431,14 @@ function fillPicker() {
 let saved: FileSystemDirectoryHandle | null = null; // the remembered folder
 
 function setupOpen() {
+  const folder = $("#folder");
+  // the popover opens under the chip
+  folder.addEventListener("beforetoggle", (e) => {
+    if ((e as ToggleEvent).newState !== "open") return;
+    const r = $("#data-chip").getBoundingClientRect();
+    folder.style.left = `${Math.max(8, Math.min(r.left, innerWidth - 436))}px`;
+    folder.style.top = `${r.bottom + 6}px`;
+  });
   if (!window.showDirectoryPicker) {
     // Firefox: a dropped folder or a folder input. Both give File objects that the page reads in the browser.
     // The input exists only here, so that browsers with the File System Access API never use it.
@@ -479,6 +487,7 @@ function setupOpen() {
     $("#trees").innerHTML = `<p class="empty">Press <b>Open game folder</b> or drop the War Thunder install folder on this page to show the research trees.<br>`
       + `The browser can call this an upload, but the files stay on this computer: the page reads them here and sends nothing.<br>`
       + `This browser cannot remember the folder, so open it again on each visit.</p>`;
+    $("#drop-note").hidden = false;
     return setStatus("Open or drop the War Thunder install folder. This browser cannot remember the folder.");
   }
   $("#open").addEventListener("click", async () => {
@@ -604,6 +613,7 @@ async function openSource(src: Source, label: string) {
   const id = ++openSeq;
   open.disabled = true;
   setStatus(`Loading ${label}…`);
+  $("#data-chip").textContent = `Loading ${label}…`;
   const { info, error } = await new Promise<Opened>((resolve) => {
     opens.set(id, resolve);
     tell({ op: "open", id, source: src });
@@ -622,21 +632,44 @@ async function openSource(src: Source, label: string) {
     render();
     fillPicker();
     shown = { src: data.src, label: data.label };
+    const inTree = [...cards.keys()].filter((id) => state.game.has(id)).length;
+    summary = { full: `${data.label} · ${data.info.source}${data.info.version ? ` ${data.info.version}` : ""} · ${inTree} vehicles`, short: `${data.info.version || data.info.source} · ${inTree} vehicles` };
   }
+  folderMode();
+  const chip = $("#data-chip");
+  chip.textContent = summary.short;
+  chip.title = `${summary.full}. Press to change, reopen or forget the game folder.`;
   if (!info) {
     setStatus(error!, true);
     return false;
   }
-  const inTree = [...cards.keys()].filter((id) => state.game.has(id)).length;
-  setStatus(`${label} · ${info.source}${info.version ? ` ${info.version}` : ""} · ${inTree} vehicles`);
+  setStatus(summary.full);
+  const folder = $("#folder");
+  if (folder.matches(":popover-open")) folder.hidePopover();
   return true; // the manager keeps the shooter that the user picked before, if the new data has it
 }
 
 function setStatus(text: string, error = false) {
   const el = $("#data-status");
   el.textContent = text;
-  el.title = text;
   el.classList.toggle("error", error);
+  // the status lies in the closed popover when the page shows game data, so an error also shows next to the chip
+  const note = $("#chip-note");
+  note.textContent = text;
+  note.hidden = !(error && shown);
+  $("#data-chip").classList.toggle("error", error && !!shown);
+}
+
+let summary = { full: "", short: "" }; // of the game data on the page
+
+// With game data on the page, the folder controls go in the popover of the chip. Before the first good
+// open, and while no open has given data, they lie in the bar.
+function folderMode() {
+  const folder = $("#folder");
+  $("#data-chip").hidden = !shown;
+  if (shown && !folder.popover) folder.popover = "auto";
+  if (!shown) folder.removeAttribute("popover");
+  if (!window.showDirectoryPicker) $("#open").textContent = shown ? "Open another folder" : "Open game folder";
 }
 
 function name(id: string) {

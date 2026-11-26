@@ -78,7 +78,15 @@ browser cannot remember the folder, so open or drop it on each visit. A datamine
 not work this way.
 
 In these browsers, a folder without `aces.vromfs.bin` at its top gives an error, and the data
-on the page stays. When you pick or drop a folder while the page still reads an older one,
+on the page stays.
+
+Before the first good open, and while no open has given data, the folder controls lie in the
+header as above. Once the page shows game data, they go into a small chip next to the brand
+(for example "2.61.0.42 · 1254 vehicles"). Press it for a popover with the folder, the source,
+the version and the buttons: **Choose another**, **Reopen** and **Forget** in Chromium
+browsers, **Open another folder** and a note on drag-and-drop in the others. Drag-and-drop
+works at all times. When an open fails and the old data stays, the chip turns red and the error
+shows under it. When you pick or drop a folder while the page still reads an older one,
 the page opens only the newest folder.
 
 Then pick the shooter in the box at the top, or click a card. The page does not pick a shooter
@@ -126,7 +134,8 @@ The panel at the top right shows the shooter's guns and each round that the simu
 type, calibre (mm), mass (kg), muzzle speed (m/s), flat penetration at 500 m (mm) and filler
 (g and explosive). Each gun's rounds are in tables of at most four rows, side by side, so that
 the header stays low. No text is cut: names wrap, and when the tables need more than about one
-line, the list scrolls. Below a window width of 1300 px the panel goes under the shooter box.
+line, the list scrolls. Below a window width of 1300 px the shooter box goes under the brand and the panel takes the
+right side; below 1000 px the panel goes under the shooter box.
 A long shooter name makes the box wider. The **best** column
 counts the targets on which each round gave the best score (also on kept results). When you hover a card, the panel
 marks the round that the card shows. Click a round to fire only that round. Click it again to

@@ -9,13 +9,17 @@
 <body>
 <header class="bar">
   <div class="bar-left">
-    <div class="bar-side">
-      <span class="brand">shotdb</span>
+    <span class="brand">shotdb</span>
+    <!-- with game data on the page, the folder controls go in a popover under this chip -->
+    <button id="data-chip" class="data-chip" popovertarget="folder" title="The game folder: change, reopen or forget it" hidden></button>
+    <div id="folder" class="folder">
       <button id="reopen" class="open-btn" hidden></button>
       <button id="open" class="open-btn" title="The War Thunder install folder (with aces.vromfs.bin) or an unpacked datamine (with aces.vromfs.bin_u)">Open game folder</button>
       <button id="forget" class="link-btn" title="Forget the remembered folder" hidden>Forget</button>
+      <span id="data-status" class="data-status">No game data open</span>
+      <span id="drop-note" class="folder-note" hidden>You can also drop the install folder on the page.</span>
     </div>
-    <span id="data-status" class="data-status">No game data open</span>
+    <span id="chip-note" class="data-status error" hidden></span>
   </div>
   <div class="picker">
     <label for="shooter" class="picker-label">Shooter</label>

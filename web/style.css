@@ -33,8 +33,32 @@ body {
   background: var(--panel);
   border-bottom: 1px solid var(--line);
 }
-.bar-left { display: flex; flex-direction: column; gap: 6px; min-width: 0; max-width: 340px; }
-.bar-side { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.bar-left { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-width: 0; max-width: 340px; }
+/* no game data on the page: the folder controls lie in the bar */
+.folder:not([popover]) { display: contents; }
+.folder:not([popover]) .data-status { flex-basis: 100%; }
+.folder[popover]:popover-open {
+  position: fixed; inset: auto; margin: 0;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px;
+  width: max-content; max-width: min(420px, calc(100vw - 16px));
+  padding: 10px 12px;
+  color: var(--text); background: #0d1014;
+  border: 1px solid #3a4350; border-radius: 6px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / .5);
+}
+.folder[popover] .data-status { flex-basis: 100%; order: -1; color: var(--text); }
+.folder[popover] .data-status.error { color: var(--nonpen); }
+.folder-note { flex-basis: 100%; font-size: 12px; color: var(--muted); }
+.folder:not([popover]) .folder-note { display: none; }
+.data-chip {
+  font: inherit; font-size: 12px; cursor: pointer;
+  color: var(--muted); background: transparent;
+  border: 1px solid var(--line); border-radius: 12px; padding: 2px 10px;
+}
+.data-chip:hover, .data-chip:focus-visible { color: var(--text); border-color: #4a5462; }
+.data-chip::after { content: " \25BE"; }
+.data-chip.error { color: var(--nonpen); border-color: var(--nonpen); }
+#chip-note { flex-basis: 100%; }
 .brand { font-weight: 700; letter-spacing: .02em; font-size: 15px; }
 .open-btn {
   font: inherit; font-size: 12px; cursor: pointer;
@@ -49,7 +73,7 @@ body {
 .data-status { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 .data-status.error { color: var(--nonpen); }
 
-.picker { display: flex; flex-direction: column; align-items: center; gap: 3px; width: min(400px, 40vw); max-width: calc(100vw - 32px); }
+.picker { display: flex; flex-direction: column; align-items: center; gap: 3px; width: min(360px, 40vw); max-width: calc(100vw - 32px); }
 .picker-label { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
 #shooter {
   width: 100%;
@@ -66,11 +90,11 @@ body {
 .rounds { min-width: 0; font-size: 11px; }
 .rounds-head { color: var(--muted); margin-bottom: 2px; }
 .rounds-head b { color: var(--text); font-weight: 600; }
-.rounds-list { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 2px 20px; max-height: 96px; overflow-y: auto; }
+.rounds-list { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 2px 14px; max-height: 96px; overflow-y: auto; }
 .rounds table { border-collapse: collapse; font-variant-numeric: tabular-nums; }
-.rounds caption { text-align: left; color: var(--text); font-weight: 600; padding: 0 5px; }
-.rounds th { font-weight: 400; color: var(--muted); text-align: right; padding: 0 5px; white-space: nowrap; }
-.rounds td { padding: 1px 5px; text-align: right; white-space: nowrap; }
+.rounds caption { text-align: left; color: var(--text); font-weight: 600; padding: 0 4px; }
+.rounds th { font-weight: 400; color: var(--muted); text-align: right; padding: 0 4px; white-space: nowrap; }
+.rounds td { padding: 1px 4px; text-align: right; white-space: nowrap; }
 .rounds td:first-child { text-align: left; white-space: normal; min-width: 7em; max-width: 14em; }
 .round { cursor: pointer; }
 .round:hover td { background: #222932; }
@@ -80,11 +104,18 @@ body {
 .round.forced td:first-child { color: var(--accent); }
 .r-wins { color: var(--accent); }
 
-/* narrow: the rounds go under the picker, over the full width */
+/* medium: brand and data over the shooter, the rounds to the right of both */
 @media (max-width: 1300px) {
   .bar { grid-template-columns: auto minmax(0, 1fr); }
-  .picker { justify-self: center; }
-  .rounds { grid-column: 1 / -1; }
+  .bar-left { grid-column: 1; grid-row: 1; }
+  .picker { grid-column: 1; grid-row: 2; }
+  .rounds { grid-column: 2; grid-row: 1 / span 2; }
+}
+/* narrow: the rounds go under the shooter, over the full width */
+@media (max-width: 1000px) {
+  .bar-left { grid-column: 1; grid-row: 1; }
+  .picker { grid-column: 2; grid-row: 1; justify-self: center; }
+  .rounds { grid-column: 1 / -1; grid-row: 2; }
 }
 
 .subbar {
