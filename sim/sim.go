@@ -5,7 +5,6 @@ package sim
 
 import (
 	"fmt"
-	"hash/fnv"
 	"math"
 	"math/rand/v2"
 	"sort"
@@ -193,9 +192,11 @@ func (s *Sim) Simulate(shooter, target string, round int) (Result, error) {
 func (s *Sim) shoot(index int, g *game.Shell, t *target) Result {
 	d := s.Data
 	sh := newShell(d, g)
-	h := fnv.New64a()
-	h.Write([]byte(g.Name + "/" + g.Type + "/" + t.v.ID))
-	seed := h.Sum64()
+	// FNV-1a of the round and the target.
+	seed := uint64(14695981039346656037)
+	for _, c := range []byte(g.Name + "/" + g.Type + "/" + t.v.ID) {
+		seed = (seed ^ uint64(c)) * 1099511628211
+	}
 
 	var hits []geom.Hit
 	var leaf []span

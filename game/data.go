@@ -41,12 +41,16 @@ func (d Dir) path(name string) string { return filepath.Join(string(d), filepath
 
 func (d Dir) Read(name string) ([]byte, error) { return os.ReadFile(d.path(name)) }
 
-func (d Dir) ReadAt(name string, off int64, n int) ([]byte, error) {
+func (d Dir) ReadAt(name string, off int64, n int) (_ []byte, err error) {
 	f, err := os.Open(d.path(name))
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() {
+		if cerr := f.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
 	st, err := f.Stat()
 	if err != nil {
 		return nil, err
