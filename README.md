@@ -66,9 +66,20 @@ access to that folder:
 
 **Choose another** picks a different folder. **Forget** removes the remembered folder.
 
-Firefox has no `showDirectoryPicker`. There, drag the install folder from the file manager
-onto the page. The page reads single files from the dropped folder, with no upload. It cannot
-remember the folder, so drop it on each visit. A datamine tree does not work this way.
+Firefox has no `showDirectoryPicker`. There, press **Open game folder** and pick the install
+folder, or drag the install folder from the file manager onto the page. The button opens a
+folder input (`<input type="file" webkitdirectory>`). The page makes this input only in
+browsers that have no `showDirectoryPicker`, so Chromium browsers never use it. Firefox calls
+the pick an upload: its dialog has the title "Select Folder to Upload" and the button
+"Upload", and then it asks "Are you sure you want to upload all files from …?". Nothing
+leaves the computer: the page reads the files in the browser and sends them to no server.
+Cancel in either dialog does nothing. From the files of the folder, the page keeps only the files above. The
+browser cannot remember the folder, so open or drop it on each visit. A datamine tree does
+not work this way.
+
+In these browsers, a folder without `aces.vromfs.bin` at its top gives an error, and the data
+on the page stays. When you pick or drop a folder while the page still reads an older one,
+the page opens only the newest folder.
 
 Then pick the shooter in the box at the top, or click a card. The page does not pick a shooter
 by itself, so no shots run until you pick one. Shots run from the shooter's RB battle rating
@@ -141,7 +152,8 @@ prints the result JSON that the page shows.
   zstd to parse the collision resource of each target.
 - `web/` holds the page sources: `index.html`, `style.css` and `src/`. `src/manager.ts` runs
   the manager's wasm and reads the chosen folder. `src/compute.ts` runs the compute wasm.
-  `src/app.ts` is the page, the pool of compute workers and the remembered folder. It draws
+  `src/app.ts` is the page, the pool of compute workers, the remembered folder, and the
+  dropped or picked folder in browsers without the File System Access API. It draws
   and passes the user's actions to the manager. `src/types.ts` has the shapes of the JSON and
   of the worker messages. `src/wasm.d.ts` and `src/fs-access.d.ts` declare the wasm APIs and
   the parts of the File System Access API that the TypeScript DOM types do not have.

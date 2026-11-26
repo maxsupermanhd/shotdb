@@ -391,23 +391,54 @@ let saved: FileSystemDirectoryHandle | null = null; // the remembered folder
 
 function setupOpen() {
   if (!window.showDirectoryPicker) {
-    // Firefox: only a dropped folder gives file access without an upload
-    $("#open").hidden = true;
+    // Firefox: a dropped folder or a folder input. Both give File objects that the page reads in the browser.
+    // The input exists only here, so that browsers with the File System Access API never use it.
+    const input = document.createElement("input");
+    input.type = "file";
+    input.webkitdirectory = true;
+    input.hidden = true;
+    document.body.append(input);
+    const open = $("#open");
+    open.title = "The War Thunder install folder (with aces.vromfs.bin). The browser can call this an upload, "
+      + "but the page reads the files on this computer and sends nothing.";
+    open.addEventListener("click", () => input.click());
+    input.addEventListener("change", async () => {
+      const list = [...input.files ?? []];
+      input.value = ""; // else the same folder picked again gives no change event
+      if (!list.length) return setStatus("The folder has no files: pick the War Thunder install folder", true);
+      const root = list[0].webkitRelativePath.split("/")[0];
+      const seq = ++readSeq;
+      setStatus(`Reading ${root}…`);
+      const files = new Map<string, File>();
+      for (let i = 0; i < list.length; i++) {
+        // An install has thousands of files: give the page time to draw between batches.
+        if (i % 2000 === 1999) await new Promise((ok) => setTimeout(ok));
+        const path = list[i].webkitRelativePath.slice(root.length + 1);
+        const dir = path.slice(0, path.lastIndexOf("/") + 1);
+        if (INSTALL_FILES.includes(path) || (dir === `${TANKS}/` && path.endsWith(".grp"))) files.set(path, list[i]);
+      }
+      await openFiles(seq, files, root);
+    });
     addEventListener("dragover", (e) => e.preventDefault());
     addEventListener("drop", async (e) => {
       e.preventDefault();
       const entry = e.dataTransfer?.items[0]?.webkitGetAsEntry();
       if (!entry?.isDirectory) return setStatus("Drop the War Thunder install folder", true);
+      const seq = ++readSeq;
       let files: Map<string, File>;
       try {
         setStatus(`Reading ${entry.name}…`);
         files = await installFiles(entry as FileSystemDirectoryEntry);
       } catch (err) {
-        return setStatus(`Cannot read ${entry.name}: ${message(err)}`, true);
+        if (seq === readSeq) setStatus(`Cannot read ${entry.name}: ${message(err)}`, true);
+        return;
       }
-      await openSource({ kind: "files", files }, entry.name);
+      await openFiles(seq, files, entry.name);
     });
-    return setStatus("Drop the War Thunder install folder on this page. This browser cannot remember it.");
+    $("#trees").innerHTML = `<p class="empty">Press <b>Open game folder</b> or drop the War Thunder install folder on this page to show the research trees.<br>`
+      + `The browser can call this an upload, but the files stay on this computer: the page reads them here and sends nothing.<br>`
+      + `This browser cannot remember the folder, so open it again on each visit.</p>`;
+    return setStatus("Open or drop the War Thunder install folder. This browser cannot remember the folder.");
   }
   $("#open").addEventListener("click", async () => {
     let handle: FileSystemDirectoryHandle;
@@ -436,7 +467,20 @@ function setupOpen() {
   restore();
 }
 
-// The files of an install that the simulation reads. A File reads nothing until asked.
+// The files of an install that the simulation reads, with the model packs TANKS/*.grp. A File reads nothing until asked.
+const INSTALL_FILES = ["aces.vromfs.bin", "char.vromfs.bin", "lang.vromfs.bin", "warthunder.yup"];
+const TANKS = "content/base/res/tanks";
+let readSeq = 0; // the newest dropped or picked folder; an older one that is still read is dropped
+
+// Opens the files of a dropped or picked install folder, if no newer folder came while they were read.
+async function openFiles(seq: number, files: Map<string, File>, label: string) {
+  if (seq !== readSeq) return;
+  if (!files.has("aces.vromfs.bin")) {
+    return setStatus(`${label} has no aces.vromfs.bin: pick the War Thunder install folder`, true);
+  }
+  await openSource({ kind: "files", files }, label);
+}
+
 async function installFiles(root: FileSystemDirectoryEntry) {
   const files = new Map<string, File>();
   const add = async (path: string, entry: FileSystemEntry) => {
@@ -447,19 +491,18 @@ async function installFiles(root: FileSystemDirectoryEntry) {
     if (dir) root.getDirectory(path, {}, ok, done);
     else root.getFile(path, {}, ok, done);
   });
-  for (const path of ["aces.vromfs.bin", "char.vromfs.bin", "lang.vromfs.bin", "warthunder.yup"]) {
+  for (const path of INSTALL_FILES) {
     const entry = await child(path, false);
     if (entry) await add(path, entry);
   }
-  const tanks = "content/base/res/tanks";
-  const dir = await child(tanks, true);
+  const dir = await child(TANKS, true);
   if (dir) {
     const reader = (dir as FileSystemDirectoryEntry).createReader();
     // readEntries gives one batch per call and an empty batch at the end
     for (;;) {
       const batch = await new Promise<FileSystemEntry[]>((ok, fail) => reader.readEntries(ok, fail));
       if (!batch.length) break;
-      await Promise.all(batch.filter((e) => e.isFile && e.name.endsWith(".grp")).map((e) => add(`${tanks}/${e.name}`, e)));
+      await Promise.all(batch.filter((e) => e.isFile && e.name.endsWith(".grp")).map((e) => add(`${TANKS}/${e.name}`, e)));
     }
   }
   return files;
