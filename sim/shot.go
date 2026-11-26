@@ -589,7 +589,8 @@ func (s *shot) explode(at, d vec) {
 
 // reach is the splash damage a part takes from a burst: full up to the inner
 // radius, then less to none at the outer one, when the armour on the way from
-// the burst to the part's centre is less than the splash penetration.
+// the burst to the part's centre is less than the splash penetration. Plates
+// on the way cost their line-of-sight thickness, solid parts their chord.
 func (s *shot) reach(at vec, i int32, outer, inner, dmg, pen float64, mech string) float64 {
 	c := s.t.center[i]
 	dist := norm(sub(c, at))
@@ -609,11 +610,11 @@ func (s *shot) reach(at vec, i int32, outer, inner, dmg, pen float64, mech strin
 			if sp.part == i || q.Module {
 				continue
 			}
-			thick := q.Thickness
+			thick := q.Thickness / math.Max(sp.cos, minCos)
 			if s.meshCharged(sp.part, sp) {
 				thick = (sp.out - sp.in) * 1000
 			}
-			if armour += q.Q(mech) * thick; armour >= pen {
+			if armour += math.Min(q.Q(mech)*thick, q.Cap(mech)); armour >= pen {
 				return 0
 			}
 		}

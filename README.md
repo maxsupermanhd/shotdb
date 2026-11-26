@@ -192,10 +192,15 @@ Approximated, and why:
 - **The APHE burst** throws its statistical shatters over a full sphere from the burst point,
   as the bank describes the effect but not the exact cone.
 - **Splash** reaches a module when the armour on the straight line from the burst to the
-  module's centre (solid parts by their chord) is less than the splash penetration, which
-  does not fall off with distance. The game's own visibility test is not known. Through the
-  overpressure rule this lets a large HE round kill a modern tank through its thin lower
-  hull side.
+  module's centre is less than the splash penetration. Plates on that line cost their
+  line-of-sight thickness (nominal / cos, with the class caps), solid parts their chord, and
+  modules on the way cost nothing. The game's own visibility test is not known. The
+  splash table of `explosive.blk` gives one penetration per filler mass, so the
+  penetration does not fall off with distance; only the damage falls off between the inner
+  and the outer radius. Each module in reach takes its own damage message and rolls its own
+  effects, as for any other hit. Through thin parts (tracks, a lower front plate, a hull
+  roof) a large HE round can still reach the racks or the crew of a modern tank, and the
+  overpressure rule then acts on the whole compartment.
 - **The vehicle is stock and full**: every rack is full, the turret faces forward, no
   modifications are fitted.
 - **No shell yaw, no stabilisation loss, no sabot petals, no movement**, a fixed 500 m.
