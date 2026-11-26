@@ -155,9 +155,8 @@ From the game, as the game does it (formulas from the knowledge bank):
   their nominal thickness at the hit angle. Parts flagged solid in the mesh (cast turrets,
   mantlets, composite blocks, engines, breeches) are charged by the chord the ray cuts.
 - **Kinetic penetration.** Drag over range, Lanz-Odermatt for long rods, De Marre (with the
-  APHE filler modifier) for full calibre rounds, the `armorpower` table for the others. The
-  tests reproduce the stat cards of DM53, DM43 and BR-412D at 10, 500 and 2000 m, flat and at
-  30 and 60 degrees. Projectile type defaults (`projectile_types/<bulletType>.blk`, for
+  APHE filler modifier) for full calibre rounds, the `armorpower` table for the others. No test
+  in this repository checks these against the stat cards. Projectile type defaults (`projectile_types/<bulletType>.blk`, for
   example the slope preset of APCBC) are merged under each bullet.
 - **Slope and ricochet.** `slope_effect.blk` (rows blended on calibre to armour, the breach
   rule, the cap of 20), `ricochet.blk` per hit, the bounce in the mirror direction with
