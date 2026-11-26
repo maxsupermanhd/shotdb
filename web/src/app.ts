@@ -30,12 +30,19 @@ const $ = <T extends HTMLElement = HTMLElement>(s: string) => document.querySele
 const clean = (name: string) => name.replace(/[␀-◿-]/g, "").trim();
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
-const manager = new Worker(new URL("./manager.js", import.meta.url), { type: "module" });
+let manager: Worker;
+let managerDown = false;
 const tell = (msg: ToManager, transfer: Transferable[] = []) => manager.postMessage(msg, transfer);
-manager.onmessage = ({ data }: MessageEvent<string>) => onManager(JSON.parse(data));
-manager.onerror = (e) => managerFailed(e.message || "the manager did not load");
-// speed: targets that a compute worker holds at once, one runs and the others wait; the manager keeps 2 for a bad value
-tell({ op: "hold", n: Number(params.get("speed") ?? 2) });
+// A new manager has no game data and no compute workers.
+function startManager() {
+  managerDown = false;
+  manager = new Worker(new URL("./manager.js", import.meta.url), { type: "module" });
+  manager.onmessage = ({ data }: MessageEvent<string>) => onManager(JSON.parse(data));
+  manager.onerror = (e) => managerFailed(e.message || "the manager did not load");
+  // speed: targets that a compute worker holds at once, one runs and the others wait; the manager keeps 2 for a bad value
+  tell({ op: "hold", n: Number(params.get("speed") ?? 2) });
+}
+startManager();
 
 // Each compute worker keeps the tables, the shooter and the target that it runs, and nothing more.
 type Peer = { id: number; worker: Worker };
@@ -117,9 +124,9 @@ type Opened = { info?: GameInfo; error?: string };
 let openSeq = 0; // the id of the newest open
 const opens = new Map<number, (r: Opened) => void>(); // open id -> its resolve
 // The data of an older open that the manager holds while a newer open loads. The page shows it when the newer open fails.
-let held: GameInfo | null = null;
+let held: { info: GameInfo; src: Source; label: string } | null = null;
+let shown: { src: Source; label: string } | null = null; // the source of the trees on the page
 let pinned = false; // the hover parameter's tooltip is shown
-let managerDown = false;
 
 function onManager(msg: FromManager) {
   switch (msg.op) {
@@ -164,13 +171,15 @@ function onManager(msg: FromManager) {
 }
 
 // The manager failed: the targets that it gave out get no result, so they fail here.
+// The compute workers stop too, as their ports go to the failed manager. The next open starts new ones.
 function managerFailed(error: string) {
   if (managerDown) return;
   managerDown = true;
   manager.terminate();
+  for (const peer of pool.splice(0)) peer.worker.terminate();
   for (const resolve of opens.values()) resolve({ error: `The manager failed: ${error}` });
   opens.clear();
-  setStatus(`The manager failed: ${error}`, true);
+  setStatus(`The manager failed: ${error}. Open a folder to start it again.`, true);
   state.stopped = error;
   for (const id of state.started) {
     state.results.set(id, { target: id, error: `the manager failed: ${error}` });
@@ -523,6 +532,13 @@ function handleStore(op: "get" | "put" | "delete", handle?: FileSystemDirectoryH
 }
 
 async function openSource(src: Source, label: string) {
+  if (managerDown) {
+    startManager();
+    setWorkers(Number($<HTMLSelectElement>("#workers").value));
+    restarts = 0;
+    // The new manager loads the shown data first: when src fails, it holds the data of the trees on the page.
+    if (shown) void openSource(shown.src, shown.label);
+  }
   const open = $<HTMLButtonElement>("#open");
   const id = ++openSeq;
   open.disabled = true;
@@ -533,17 +549,18 @@ async function openSource(src: Source, label: string) {
   });
   // The manager runs the opens in order. Only the newest open shows its data, or the held data when it fails.
   if (id !== openSeq) {
-    if (info) held = info;
+    if (info) held = { info, src, label };
     return false;
   }
   open.disabled = false;
-  const data = info ?? held;
+  const data = info ? { info, src, label } : held;
   held = null;
   if (data) {
-    state.game = new Map(data.units.map((u) => [u.id, { ...u, name: clean(u.name) }]));
-    trees = data.trees;
+    state.game = new Map(data.info.units.map((u) => [u.id, { ...u, name: clean(u.name) }]));
+    trees = data.info.trees;
     render();
     fillPicker();
+    shown = { src: data.src, label: data.label };
   }
   if (!info) {
     setStatus(error!, true);
