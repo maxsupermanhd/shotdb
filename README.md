@@ -156,8 +156,9 @@ From the game, as the game does it (formulas from the knowledge bank):
   mantlets, composite blocks, engines, breeches) are charged by the chord the ray cuts.
 - **Kinetic penetration.** Drag over range, Lanz-Odermatt for long rods, De Marre (with the
   APHE filler modifier) for full calibre rounds, the `armorpower` table for the others. No test
-  in this repository checks these against the stat cards. Projectile type defaults (`projectile_types/<bulletType>.blk`, for
-  example the slope preset of APCBC) are merged under each bullet.
+  in this repository checks these against the stat cards. Projectile type defaults
+  (`projectile_types/<bulletType>.blk`, for example the slope preset of APCBC) are merged
+  under each bullet.
 - **Slope and ricochet.** `slope_effect.blk` (rows blended on calibre to armour, the breach
   rule, the cap of 20), `ricochet.blk` per hit, the bounce in the mirror direction with
   `ricochetPenetrationModifier` and 0.3 of the speed, up to two bounces. Penetration
@@ -180,13 +181,20 @@ From the game, as the game does it (formulas from the knowledge bank):
 - **Damage and kills.** Each part's hp, its `onHit` rules (the strongest rule below the
   damage, gated by `partDamageEffectThreshold`) and `onKill` draws: fires, ammo explosions,
   fuel tank explosions, crew and module kills. The vehicle dies when fewer crew than
-  `minCrewCount` (default 2) live, when a rack whose round has a filler explodes (or a
-  charges rack burns, as the rack's flags say), or when an internal fuel tank explodes.
+  `minCrewCount` (default 2) live, when an internal fuel tank explodes, or when a rack
+  goes off as the game's ammo script says. An `expl` on a shells rack whose round has a
+  filler is an explosion, which ends the vehicle if the rack has `fatalExplosion`. A `fire`,
+  or an `expl` on a charges rack or on a rack whose round has no filler, is an ammo fire,
+  which ends the vehicle if the rack has `fatalFire`.
   An exterior tank (group `fuel_tanks_exterior`, fire preset `fuel_exterior`) does not end
   the vehicle.
 
 Approximated, and why:
 
+- **A fatal ammo fire ends the vehicle at once.** The script sends `EventAmmoStowageDoFatalFire`,
+  and the game has the death reason "Ammunition load burnt down", but the native handler of
+  the event is not decoded, so its delay is not known. The script's test that the round in
+  the slot has powder is not made: every round is taken to have it.
 - **An exterior fuel tank's explosion** does nothing. The game gives it its own splash
   table (`externalFuelMassToSplashParams` in `damagemodel.blk`, by fuel mass), but the fuel
   mass of each tank is not read here.
