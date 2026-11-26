@@ -62,11 +62,10 @@ type Part struct {
 
 // Rule is one onHit or onKill rule of DamageEffects.
 type Rule struct {
-	Types    []string // damage types; none matches every type
-	Not      []string // notDamageType
-	Damage   float64
-	Effects  []Effect // sorted by name
-	Critical bool
+	Types   []string // damage types; none matches every type
+	Not     []string // notDamageType
+	Damage  float64
+	Effects []Effect // sorted by name
 }
 
 // Effect is a chance of expl, full_expl, fire, nothing, cut, or of killing a named part.
@@ -385,7 +384,6 @@ func rules(list []tree) []Rule {
 	var out []Rule
 	for _, b := range list {
 		r := Rule{Types: strs(b, "damageType"), Not: strs(b, "notDamageType"), Damage: numOr(b, "damage", 0)}
-		r.Critical = b["fHitCritical"] == true
 		for _, k := range sortedKeys(b) {
 			if f, ok := b[k].(float64); ok && k != "damage" {
 				r.Effects = append(r.Effects, Effect{strings.TrimSuffix(k, "_dm"), f})

@@ -23,10 +23,7 @@ import (
 	"shotdb/sim"
 )
 
-var (
-	opened    *game.Data
-	simulator sim.Simulator
-)
+var simulator sim.Simulator
 
 func main() {
 	api := js.Global().Get("Object").New()
@@ -40,7 +37,6 @@ func main() {
 			if err != nil {
 				return "", err
 			}
-			opened = data
 			simulator = &sim.Sim{Data: data}
 			units := make([]game.Unit, 0, len(data.Units))
 			for _, u := range data.Units {

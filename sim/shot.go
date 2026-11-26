@@ -45,10 +45,8 @@ type shot struct {
 	leaf []span     // scratch of the traces that start no other: fragments and splash
 
 	msgs     []message
-	pierced  bool // a plate was perforated
 	broke    bool // the core broke up
 	ricochet bool
-	burst    *vec // where the filler went off
 	// First armour plate met, and its charge, for the summary.
 	first       int32
 	firstCharge float64
@@ -229,9 +227,6 @@ func (s *shot) kinetic(o, d vec, spans []span, pen, speed float64, bounces int) 
 			return
 		}
 		residual := pen - cost
-		if !p.Module {
-			s.pierced = true
-		}
 		if sh.ExplMass > 0 && math.IsInf(armed, 1) && cost > sh.ExplThresh {
 			armed = sp.in
 		}
@@ -365,9 +360,6 @@ func (s *shot) jet(o, d vec, spans []span, start float64) {
 			return
 		}
 		pen -= cost
-		if !p.Module {
-			s.pierced = true
-		}
 		if p.Spall && sh.JetSpall != "" && pen > 0 {
 			s.cone(sh.JetSpall, o, d, sp, pen, cost)
 		}
@@ -518,7 +510,6 @@ func (s *shot) explode(at, d vec) {
 	if sh.ExplMass <= 0 {
 		return
 	}
-	s.burst = &at
 	before := len(s.msgs)
 	tntB := sh.ExplMass * strength(s.d.Brisance, sh.ExplType)
 	var class *game.ShatterClass
