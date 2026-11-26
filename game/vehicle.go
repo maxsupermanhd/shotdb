@@ -191,13 +191,20 @@ type LanzOdermatt struct {
 	Length, Density, Hardness float64
 }
 
-// Vehicle loads a unit, once.
+// keptVehicles bounds the memory: a queue loads every unit once, and a loaded
+// unit takes about 0.2 MB.
+const keptVehicles = 32
+
+// Vehicle loads a unit. The last units loaded are kept.
 func (d *Data) Vehicle(id string) (*Vehicle, error) {
 	id = strings.ToLower(id)
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if v, ok := d.vehicles[id]; ok {
-		return v, nil
+	for i, v := range d.vehicles {
+		if v.ID == id {
+			d.vehicles = append(append(d.vehicles[:i:i], d.vehicles[i+1:]...), v)
+			return v, nil
+		}
 	}
 	u, ok := d.Units[id]
 	if !ok {
@@ -237,7 +244,10 @@ func (d *Data) Vehicle(id string) (*Vehicle, error) {
 			}
 		}
 	}
-	d.vehicles[id] = v
+	if len(d.vehicles) >= keptVehicles {
+		d.vehicles = d.vehicles[1:]
+	}
+	d.vehicles = append(d.vehicles, v)
 	return v, nil
 }
 
@@ -466,13 +476,9 @@ func (d *Data) shells(t tree, v *Vehicle) error {
 			if path == "" || strings.HasSuffix(path, "dummy_weapon.blk") {
 				continue
 			}
-			wt, ok := d.weapons[path]
-			if !ok {
-				var err error
-				if wt, err = d.blk("aces", path); err != nil {
-					return fmt.Errorf("%s: %w", v.ID, err)
-				}
-				d.weapons[path] = wt
+			wt, err := d.blk("aces", path)
+			if err != nil {
+				return fmt.Errorf("%s: %w", v.ID, err)
 			}
 			base := strings.TrimSuffix(path[strings.LastIndex(path, "/")+1:], ".blk")
 			gun := d.names["weapons/"+base]

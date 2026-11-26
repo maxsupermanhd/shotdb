@@ -253,8 +253,17 @@ Measured on the 2.61.0.37 install:
   T-90A 1.1 s; WWII pairs 0.43 to 0.56 s. Wasm runs about 3.4 times slower than native.
 
 The cost is mostly the shot lines (48 to 64 per view and round) and the fragment rays behind
-each perforation. A prepared target (mesh, BVH, lines) is kept for the last 16 targets; a mesh
-takes a few MB, so all of them would not fit in wasm memory.
+each perforation. A prepared target (mesh, BVH, lines) is kept for the last 4 targets, and a
+loaded unit for the last 32 units. A mesh takes a few MB, and a queue fires at each target once.
+
+## Memory
+
+Wasm memory never shrinks, so the peak sets the size of each worker. On the 2.61.0.37 install
+one worker takes about 210 MB of wasm memory, from open to the end of a full queue (headless
+Chromium, four workers, the M4A2 queue of 1263 targets). The peak comes from `open`: the
+containers unpack one at a time, and the parse of `char.vromfs.bin/config/wpcost.blk` makes a
+tree of about 90 MB for a short time. After `open` a worker keeps about 25 MB of game data:
+the name maps, the `lang` names and the files of `aces.vromfs.bin` that the simulation reads.
 
 ## Checks
 

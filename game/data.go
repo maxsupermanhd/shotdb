@@ -4,6 +4,7 @@ package game
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/csv"
 	"encoding/json"
 	"errors"
@@ -14,6 +15,8 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -120,8 +123,7 @@ type Data struct {
 	Globals
 
 	mu       sync.Mutex
-	vehicles map[string]*Vehicle
-	weapons  map[string]tree
+	vehicles []*Vehicle // the most recent last
 	ptypes   map[string]tree
 	packs    map[string]packRef // collision resource -> pack, once indexed
 
@@ -131,29 +133,32 @@ var groundClasses = map[string]bool{"exp_tank": true, "exp_heavy_tank": true, "e
 
 // Open finds the game data in a directory and loads the tables and the unit list.
 func Open(files Files) (*Data, error) {
-	d := &Data{files: files, vehicles: map[string]*Vehicle{}, weapons: map[string]tree{}, ptypes: map[string]tree{}}
-	raw, err := files.Read("aces.vromfs.bin")
+	d := &Data{files: files, ptypes: map[string]tree{}}
+	_, err := files.ReadAt("aces.vromfs.bin", 0, 16)
 	switch {
 	case err == nil:
 		d.Source = "game install (vromfs)"
 		d.vromfs = map[string]map[string][]byte{}
 		d.slims = map[string]slim{}
-		if err := d.mount("aces", raw); err != nil {
-			return nil, err
-		}
-		for _, c := range []string{"char", "lang"} {
-			raw, err := files.Read(c + ".vromfs.bin")
-			if err != nil {
-				return nil, fmt.Errorf("%s.vromfs.bin: %w", c, err)
-			}
-			if err := d.mount(c, raw); err != nil {
-				return nil, err
-			}
-		}
 		if yup, err := files.Read("warthunder.yup"); err == nil {
 			if m := regexp.MustCompile(`7:version\d+:([0-9.]+)`).FindSubmatch(yup); m != nil {
 				d.Version = string(m[1])
 			}
+		}
+		// The containers go in one at a time, and each lets go of what it does
+		// not need, so that the peak memory stays low: wasm memory never shrinks.
+		if err := d.mount("lang", nil); err != nil {
+			return nil, err
+		}
+		if err := d.loadNames(); err != nil {
+			return nil, err
+		}
+		d.unmount("lang")
+		if err := d.mount("aces", []string{"config/damagemodel.blk", "gamedata/damage_model/", "gamedata/units/tankmodels/", "gamedata/weapons/"}); err != nil {
+			return nil, err
+		}
+		if err := d.mount("char", nil); err != nil {
+			return nil, err
 		}
 	case errors.Is(err, fs.ErrNotExist):
 		if _, err := files.Read("aces.vromfs.bin_u/gamedata/damage_model/slope_effect.blkx"); err != nil {
@@ -166,6 +171,9 @@ func Open(files Files) (*Data, error) {
 		if v, err := files.Read("version"); err == nil {
 			d.Version = strings.TrimSpace(string(v))
 		}
+		if err := d.loadNames(); err != nil {
+			return nil, err
+		}
 	default:
 		return nil, fmt.Errorf("aces.vromfs.bin: %w", err)
 	}
@@ -173,18 +181,19 @@ func Open(files Files) (*Data, error) {
 	if err := d.loadTables(); err != nil {
 		return nil, err
 	}
-	if err := d.loadNames(); err != nil {
-		return nil, err
-	}
 	wp, err := d.blk("char", "config/wpcost.blk")
 	if err != nil {
 		return nil, err
 	}
+	runtime.GC() // wpcost.blk is large: drop the garbage of its parse before the next ones
 	if err := d.loadUnits(wp); err != nil {
 		return nil, err
 	}
 	if err := d.loadTrees(wp); err != nil {
 		return nil, err
+	}
+	if d.vromfs != nil {
+		d.unmount("char")
 	}
 	return d, nil
 }
@@ -196,7 +205,16 @@ type slim struct {
 	zstd  *zstd.Decoder
 }
 
-func (d *Data) mount(container string, raw []byte) error {
+// mount reads a container. With keep, only the files under those path
+// prefixes stay, copied out, so that the unpacked image can go.
+func (d *Data) mount(container string, keep []string) error {
+	raw, err := d.files.Read(container + ".vromfs.bin")
+	if err != nil {
+		return fmt.Errorf("%s.vromfs.bin: %w", container, err)
+	}
+	if raw, err = unpack(raw); err != nil {
+		return fmt.Errorf("%s.vromfs.bin: %w", container, err)
+	}
 	v, err := wtcontent.ReadVROMFS(raw)
 	if err != nil {
 		return fmt.Errorf("%s.vromfs.bin: %w", container, err)
@@ -216,9 +234,74 @@ func (d *Data) mount(container string, raw []byte) error {
 	if s.zstd, err = zstd.NewReader(nil, opts...); err != nil {
 		return fmt.Errorf("%s.vromfs.bin: %w", container, err)
 	}
+	if keep != nil {
+		kept := map[string][]byte{}
+		for name, data := range v.Files {
+			if slices.ContainsFunc(keep, func(p string) bool { return strings.HasPrefix(name, p) }) {
+				kept[name] = bytes.Clone(data)
+			}
+		}
+		v.Files = kept
+	}
 	d.vromfs[container] = v.Files
 	d.slims[container] = s
+	runtime.GC()
 	return nil
+}
+
+// unpack gives the container in its stored form, with the image unpacked in one
+// buffer of the image's size. wtcontent.ReadVROMFS unpacks with io.ReadAll,
+// whose growth takes about three times the image at its peak. unpack changes raw.
+func unpack(raw []byte) ([]byte, error) {
+	if len(raw) < 24 {
+		return nil, errors.New("file too short")
+	}
+	le := binary.LittleEndian
+	pack := le.Uint32(raw[12:16])
+	if pack>>26 == 0x20 {
+		return raw, nil
+	}
+	body := raw[16:]
+	if string(raw[:4]) == "VRFx" {
+		body = raw[24:]
+	}
+	if size := int(pack & 0x03FFFFFF); size > 0 && size <= len(body) {
+		body = body[:size] // an md5 digest can follow the image
+	}
+	// The first and the last 16 bytes of the packed image are xored.
+	key := [4]uint32{0xAA55AA55, 0xF00FF00F, 0xAA55AA55, 0x12481248}
+	if len(body) >= 16 {
+		for i := range 4 {
+			le.PutUint32(body[4*i:], le.Uint32(body[4*i:])^key[i])
+		}
+		if mid := (len(body) & 0x03FFFFFC) - 16; len(body) > 32 && mid >= 16 {
+			for i := range 4 {
+				le.PutUint32(body[mid+4*i:], le.Uint32(body[mid+4*i:])^key[3-i])
+			}
+		}
+	}
+	dec, err := zstd.NewReader(nil, zstd.WithDecoderConcurrency(1))
+	if err != nil {
+		return nil, err
+	}
+	defer dec.Close()
+	img, err := dec.DecodeAll(body, make([]byte, 16))
+	if err != nil {
+		return nil, err
+	}
+	copy(img, "VRFs")
+	le.PutUint32(img[8:], uint32(len(img)-16))
+	le.PutUint32(img[12:], 0x20<<26)
+	return img, nil
+}
+
+func (d *Data) unmount(container string) {
+	if s, ok := d.slims[container]; ok {
+		s.zstd.Close()
+	}
+	delete(d.slims, container)
+	delete(d.vromfs, container)
+	runtime.GC()
 }
 
 // read gives a raw file of a container, for example ("lang", "lang/units.csv").
@@ -407,7 +490,7 @@ func (d *Data) loadNames() error {
 				return fmt.Errorf("%s: %w", file, err)
 			}
 			if len(rec) > 1 && strings.HasPrefix(rec[0], f.prefix) {
-				d.names[rec[0]] = rec[1]
+				d.names[strings.Clone(rec[0])] = strings.Clone(rec[1]) // a record shares one string with all its languages
 			}
 		}
 	}

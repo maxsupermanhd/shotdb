@@ -93,14 +93,16 @@ type Sim struct {
 	targets []*target // the most recent last
 }
 
-// keptTargets bounds the memory: a target's mesh takes a few MB.
-const keptTargets = 16
+// keptTargets bounds the memory: a target's mesh takes a few MB. A queue fires
+// at each target once, so a kept target helps only when a new queue starts
+// with the last targets of the queue before.
+const keptTargets = 4
 
 func (s *Sim) target(v *game.Vehicle) (*target, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for i, t := range s.targets {
-		if t.v == v {
+		if t.v.ID == v.ID {
 			s.targets = append(append(s.targets[:i:i], s.targets[i+1:]...), t)
 			return t, nil
 		}
