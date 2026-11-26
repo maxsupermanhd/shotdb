@@ -67,8 +67,13 @@ Firefox has no `showDirectoryPicker`. There, drag the install folder from the fi
 onto the page. The page reads single files from the dropped folder, with no upload. It cannot
 remember the folder, so drop it on each visit. A datamine tree does not work this way.
 
-Then pick the shooter in the box at the top, or click a card. Shots run from the shooter's RB
-battle rating outwards, up and down. Hover a card for the details.
+Then pick the shooter in the box at the top, or click a card. The page does not pick a shooter
+by itself, so no shots run until you pick one. Shots run from the shooter's RB battle rating
+outwards, up and down. Hover a card for the details.
+
+**Pause** next to the progress bar stops the queue: the workers finish the batch that they run
+and take no new one. **Resume** continues from the same place. A new shooter or round starts
+its queue at once, also when the queue is paused.
 
 The panel at the top right shows the shooter's gun and each round that the simulation fires:
 type, calibre, mass, muzzle speed, flat penetration at 500 m and filler. The **best** column
@@ -89,8 +94,8 @@ picture height and the bars). The trees scroll down. The picture keeps its natur
 the tile width, so a tile always shows at least 80 % of the picture width. Below 8 px the page
 keeps 8 px tiles and scrolls sideways. The page keeps the choice in `localStorage`.
 
-URL parameters: `shooter`, `nations` (comma list), `speed` (targets per worker call, default 8)
-and `hover` (unit id to pin a tooltip once the queue is done).
+URL parameters: `nations` (comma list), `speed` (targets per worker call, default 8) and
+`hover` (unit id to pin a tooltip once the queue is done).
 
 ### Command line
 

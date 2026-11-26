@@ -19,7 +19,7 @@
   </div>
   <div class="picker">
     <label for="shooter" class="picker-label">Shooter</label>
-    <input id="shooter" list="shooter-list" placeholder="Type a vehicle name" autocomplete="off" spellcheck="false">
+    <input id="shooter" list="shooter-list" placeholder="Pick a shooter: type a vehicle name" autocomplete="off" spellcheck="false">
     <datalist id="shooter-list"></datalist>
     <div id="shooter-info" class="shooter-info"></div>
   </div>
@@ -30,6 +30,7 @@
   <div class="progress" title="Simulation queue, ordered outwards from the shooter's RB battle rating">
     <div class="progress-track"><div id="progress-fill" class="progress-fill"></div></div>
     <span id="progress-text" class="progress-text"></span>
+    <button id="pause" class="chip" title="Workers finish the batch that they run and take no new one" disabled>Pause</button>
   </div>
   <div class="compact-ctl">
     <button id="compact" class="chip" title="Show each vehicle as a small square picture, sized so that all shown trees fit the window">Compact</button>

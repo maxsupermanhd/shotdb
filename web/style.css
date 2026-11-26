@@ -103,6 +103,7 @@ body {
 .progress-track { flex: 1; max-width: 320px; height: 6px; background: var(--pending); border-radius: 3px; overflow: hidden; }
 .progress-fill { height: 100%; width: 0; background: var(--accent); }
 .progress-text { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.chip:disabled { opacity: .4; cursor: default; }
 
 .workers { color: var(--muted); font-size: 12px; }
 .workers select { font: inherit; color: var(--text); background: var(--page); border: 1px solid var(--line); border-radius: 4px; }
@@ -165,6 +166,8 @@ body {
 }
 .card.running { box-shadow: inset 0 0 0 1px var(--accent); }
 .card.void { background: var(--pending); color: var(--muted); }
+/* no shooter picked: no queue, so no stripes */
+.idle .card:not(.done) { background: var(--pending); }
 .card.nodata { opacity: .45; }
 .card:hover { border-color: rgb(255 255 255 / .45); }
 .card.prem .card-name { color: #f3d98b; }
