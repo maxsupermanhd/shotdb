@@ -45,6 +45,18 @@ type Result struct {
 	Score   float64      `json:"score"`
 	Ms      float64      `json:"ms"`    // time spent, all shells
 	Shots   int          `json:"shots"` // shots simulated, all shells
+	// With round -1: the result of each round, by its index. The page keeps
+	// them to show a single round later without a new simulation.
+	Each []RoundResult `json:"each,omitempty"`
+}
+
+// RoundResult is the result of one round when Simulate fires all rounds.
+// The same round fired alone gives the same views, score and shots.
+type RoundResult struct {
+	Views []ViewResult `json:"views"`
+	Score float64      `json:"score"`
+	Ms    float64      `json:"ms"`
+	Shots int          `json:"shots"`
 }
 
 // ShellInfo is a round of the shooter. Index is its place in Rounds.
@@ -107,6 +119,7 @@ func (sh *shell) info(index int) ShellInfo {
 // Simulate fires the shooter a at the target v, on the target's collision
 // nodes, along the shot lines of s. With round -1 it fires every round of the
 // shooter and keeps the best, else only that round.
+// With round -1 the result also holds the result of each round in Each.
 func Simulate(d *dm.Tables, a, v *dm.Vehicle, nodes []geom.Node, round int, s Sample) (Result, error) {
 	start := time.Now()
 	if round >= len(a.Shells) {
@@ -119,17 +132,22 @@ func Simulate(d *dm.Tables, a, v *dm.Vehicle, nodes []geom.Node, round int, s Sa
 	best := Result{}
 	bestPen := -1.0
 	shots := 0
+	var each []RoundResult
 	for k := range a.Shells {
 		if round >= 0 && k != round {
 			continue
 		}
+		at := time.Now()
 		r := shoot(d, k, &a.Shells[k], t)
 		shots += r.Shots
+		if round < 0 {
+			each = append(each, RoundResult{Views: r.Views, Score: r.Score, Shots: r.Shots, Ms: math.Round(float64(time.Since(at).Microseconds())/100) / 10})
+		}
 		if best.Shell == nil || r.Score > best.Score || (r.Score == best.Score && r.Shell.PenMm > bestPen) {
 			best, bestPen = r, r.Shell.PenMm
 		}
 	}
-	best.Shooter, best.Target, best.Shots = a.ID, v.ID, shots
+	best.Shooter, best.Target, best.Shots, best.Each = a.ID, v.ID, shots, each
 	if best.Shell == nil {
 		for _, view := range Views {
 			best.Views = append(best.Views, ViewResult{Name: view.Name, Counts: map[Outcome]int{}})

@@ -82,6 +82,15 @@ export interface SimResult {
   score: number;
   ms: number;
   shots: number;
+  each?: RoundResult[]; // when all rounds are fired: the result of each round, by its index
+}
+
+// One round of a SimResult with all rounds. The same round fired alone gives the same views, score and shots.
+export interface RoundResult {
+  views: View[];
+  score: number;
+  ms: number;
+  shots: number;
 }
 
 export interface SimError {
@@ -98,30 +107,35 @@ export type Source =
 // Page -> manager. See cmd/manager.
 export type ToManager =
   | { op: "open"; id: number; source: Source }
-  | { op: "shooter"; id: string }
-  | { op: "round"; index: number }
-  | { op: "lines"; n: number } // shot lines a round on each target, one of the counts of "samples"
+  | ({ op: "run" } & Choice)
+  | { op: "go"; gen: number; done: string[] } // start queue gen; done: the targets that the page has results for
   | { op: "pause" }
   | { op: "hold"; n: number }
   | { op: "worker"; id: number; port: MessagePort }
   | { op: "drop"; id: number }
   | { op: "failed"; id: number; error: string; gen?: number; target?: string };
 
+// What the user picked. lines: shot lines a round on each target, one of the counts of "samples".
+export interface Choice {
+  shooter: string; // "" for none
+  round: number; // the only round to fire, or -1 for the best of all
+  lines: number;
+}
+
 export interface Progress {
-  done: number;
+  done: number; // also the targets that the page had results for
   total: number;
   running: number; // targets that the compute workers hold
-  ms: number; // simulation time of the done targets
   paused: boolean;
   at?: number; // BR of the next target
-  wins: number[] | null; // targets per round that the round was best on
 }
 
 // Manager -> page, as JSON strings. gen is the queue that the message is about.
 export type FromManager =
-  | { op: "samples"; lines: number[]; default: number } // the line counts that "lines" takes
+  | { op: "samples"; lines: number[]; default: number } // the line counts that "run" takes
   | { op: "opened"; id: number; info?: GameInfo; error?: string }
-  | { op: "queue"; gen: number; shooter: string; lines: number; error?: string; round?: number; range?: number; rounds?: Shell[]; targets?: string[] }
+  // a new queue, which waits for "go"; source and version of the game data when the manager has data
+  | { op: "queue"; gen: number; shooter: string; lines: number; source?: string; version?: string; error?: string; round?: number; range?: number; rounds?: Shell[]; targets?: string[] }
   | { op: "start"; gen: number; target: string }
   | { op: "back"; gen: number; targets: string[] } // targets that went back in the queue
   | ({ op: "result"; gen: number; target: string } & ({ result: SimResult } | { error: string }))

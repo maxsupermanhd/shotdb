@@ -16,9 +16,11 @@
 // Messages of the page:
 //
 //	{op: "open", id, source}   open the game files of a source; the answer "opened" has the same id
-//	{op: "shooter", id}        "" for none
-//	{op: "round", index}       fire only that round; the same index again fires all
-//	{op: "lines", n}           shot lines a round on each target, a count of sim.Samples; others keep the count
+//	{op: "run", shooter, round, lines}
+//	                           start the queue of the shooter ("" for none), the round (-1 for the
+//	                           best of all) and the shot lines a round (a count of sim.Samples; others
+//	                           keep the count). With no game data, the manager keeps the choice for the next open.
+//	{op: "go", gen, done}      start queue gen; done lists the targets that the page has results for
 //	{op: "pause"}              stop or continue the queue
 //	{op: "hold", n}            targets that a compute worker holds at once
 //	{op: "worker", id, port}   a compute worker joined; port is a MessagePort to it
@@ -28,7 +30,8 @@
 //	                           absent when it ran none): that target fails, the others go back
 //
 // Messages to the page are JSON strings, see web/src/types.ts. The first one,
-// "samples", gives the line counts that "lines" takes.
+// "samples", gives the line counts that "run" takes. Each new queue ("queue")
+// waits for the "go" of the page, so that the page can give the results that it keeps.
 package main
 
 import (
@@ -76,10 +79,9 @@ type manager struct {
 	shooterPkt []byte
 	gen        int // bumps on every queue restart; answers of older queues are dropped
 	queue      []string
+	waiting    bool // for the "go" of the queue
 	total      int
 	done       int
-	ms         float64
-	wins       []int
 	paused     bool
 	hold       int // targets per worker: one runs, the others wait in the worker
 
@@ -129,36 +131,33 @@ func main() {
 		case "open":
 			id, src := msg.Get("id").Int(), msg.Get("source")
 			push(func(m *manager) { m.open(id, src) })
-		case "shooter":
-			id := msg.Get("id").String()
+		case "run":
+			id, round, n := msg.Get("shooter").String(), msg.Get("round").Int(), msg.Get("lines").Float()
 			push(func(m *manager) {
-				if id != m.shooter {
-					m.round = -1
+				m.shooter, m.round = id, round
+				if i := slices.IndexFunc(sim.Samples, func(s sim.Sample) bool { return float64(s.Lines()) == n }); i >= 0 {
+					m.sample = i
 				}
-				m.shooter = id
-				m.restart()
-			})
-		case "round":
-			i := msg.Get("index").Int()
-			push(func(m *manager) {
-				if m.round == i {
-					m.round = -1
-				} else {
-					m.round = i
-				}
-				m.restart()
-			})
-		case "lines":
-			n := msg.Get("n").Float()
-			push(func(m *manager) {
-				i := slices.IndexFunc(sim.Samples, func(s sim.Sample) bool { return float64(s.Lines()) == n })
-				if i < 0 || i == m.sample {
-					return
-				}
-				m.sample = i
-				if m.shooter != "" {
+				if m.data != nil {
 					m.restart()
 				}
+			})
+		case "go":
+			gen := msg.Get("gen").Int()
+			list := msg.Get("done")
+			done := make(map[string]bool, list.Length())
+			for i := range list.Length() {
+				done[list.Index(i).String()] = true
+			}
+			push(func(m *manager) {
+				if gen != m.gen || !m.waiting {
+					return
+				}
+				m.waiting = false
+				n := len(m.queue)
+				m.queue = slices.DeleteFunc(m.queue, func(t string) bool { return done[t] })
+				m.done += n - len(m.queue)
+				m.progress()
 			})
 		case "pause":
 			push(func(m *manager) {
@@ -289,26 +288,27 @@ func (m *manager) open(id int, src js.Value) {
 		units = append(units, u)
 	}
 	post(map[string]any{"op": "opened", "id": id, "info": map[string]any{"source": d.Source, "version": d.Version, "units": units, "trees": d.Trees}})
-	// a shooter that the user picked before stays, if the new data has it
-	if _, ok := d.Units[m.shooter]; !ok {
-		m.shooter = ""
-	}
-	m.restart()
+	m.restart() // a shooter that the user picked before stays, if the new data has it
 }
 
-// restart starts the queue of the shooter, the round and the sample, outwards from the
-// shooter's BR: by distance, the higher BR first on ties.
+// restart makes the queue of the shooter, the round and the sample, outwards from the
+// shooter's BR: by distance, the higher BR first on ties. The queue starts on the "go" of the page.
 func (m *manager) restart() {
 	m.stop()
 	m.paused = false // a new shooter, round or line count starts its queue at once
-	m.queue, m.rounds, m.wins, m.shooterPkt = nil, nil, nil, nil
-	m.total, m.done, m.ms = 0, 0, 0
+	m.queue, m.rounds, m.shooterPkt = nil, nil, nil
+	m.total, m.done, m.waiting = 0, 0, false
 	msg := map[string]any{"op": "queue", "gen": m.gen, "shooter": m.shooter, "lines": sim.Samples[m.sample].Lines()}
 	defer func() {
 		post(msg)
 		m.progress()
 	}()
-	if m.shooter == "" || m.data == nil {
+	if m.data == nil {
+		m.shooter = ""
+		return
+	}
+	msg["source"], msg["version"] = m.data.Source, m.data.Version
+	if _, ok := m.data.Units[m.shooter]; !ok {
 		m.shooter = ""
 		return
 	}
@@ -322,10 +322,9 @@ func (m *manager) restart() {
 		return
 	}
 	m.rounds = sim.Rounds(&m.data.Tables, a)
-	if m.round >= len(m.rounds) {
+	if m.round >= len(m.rounds) || m.round < 0 {
 		m.round = -1
 	}
-	m.wins = make([]int, len(m.rounds))
 	m.shooterPkt = pkt
 	for _, w := range m.workers {
 		send(w, map[string]any{"op": "shooter", "gen": m.gen, "round": m.round, "sample": m.sample}, pkt)
@@ -338,12 +337,13 @@ func (m *manager) restart() {
 		return cmp.Or(cmp.Compare(math.Abs(dx), math.Abs(dy)), cmp.Compare(dy, dx), strings.Compare(x, y))
 	})
 	m.total = len(m.queue)
+	m.waiting = true
 	msg["round"], msg["range"], msg["rounds"], msg["targets"] = m.round, sim.Range, m.rounds, m.queue
 }
 
 // dispatch gives the next target to the worker that holds the fewest, if one has room.
 func (m *manager) dispatch() bool {
-	if m.shooterPkt == nil || m.paused || len(m.queue) == 0 {
+	if m.shooterPkt == nil || m.paused || m.waiting || len(m.queue) == 0 {
 		return false
 	}
 	var w *worker
@@ -399,11 +399,7 @@ func (m *manager) answer(w *worker, j job, result string) {
 		m.finish(j.target, "", errors.New("the compute worker gave no result"))
 		return
 	}
-	var r struct {
-		Error string
-		Ms    float64
-		Shell *struct{ Index int }
-	}
+	var r struct{ Error string }
 	if err := json.Unmarshal([]byte(result), &r); err != nil {
 		m.finish(j.target, "", fmt.Errorf("result: %w", err))
 		return
@@ -411,10 +407,6 @@ func (m *manager) answer(w *worker, j job, result string) {
 	if r.Error != "" {
 		m.finish(j.target, "", errors.New(r.Error))
 		return
-	}
-	m.ms += r.Ms
-	if r.Shell != nil && r.Shell.Index < len(m.wins) {
-		m.wins[r.Shell.Index]++
 	}
 	m.finish(j.target, result, nil)
 }
@@ -440,7 +432,7 @@ func (m *manager) progress() {
 			}
 		}
 	}
-	msg := map[string]any{"op": "progress", "gen": m.gen, "done": m.done, "total": m.total, "running": running, "ms": m.ms, "paused": m.paused, "wins": m.wins}
+	msg := map[string]any{"op": "progress", "gen": m.gen, "done": m.done, "total": m.total, "running": running, "paused": m.paused}
 	if len(m.queue) > 0 {
 		msg["at"] = m.data.Units[m.queue[0]].BR
 	}

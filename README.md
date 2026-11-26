@@ -89,6 +89,31 @@ outwards, up and down. Hover a card for the details.
 and take no new one. **Resume** continues from the same place. A new shooter or round starts
 its queue at once, also when the queue is paused.
 
+### Kept results
+
+The page keeps each shot result in IndexedDB (database `shotdb`, stores `results` and
+`runs`). When you go back to a shooter, round or **Shots** count of before, the page shows
+the kept results at once and runs only the other targets. This is also true after a reload
+and for a queue that stopped before its end. The progress text shows how many results are
+kept, and the time a pair counts only the targets that ran now.
+
+The key of a run holds all that changes a result: the build of the simulation code (a hash
+of `manager.wasm` and `compute.wasm` that `cmd/build` puts in the page as `BUILD_ID`), the
+source and the version of the game data, the shooter, the round (-1 for the best of all) and
+the shot lines a round. A result stays valid for 24 hours after it ran. The page does not use
+an older result and runs the target again. Errors are not kept.
+
+When all rounds are fired, a result also holds the views, the score and the shots of each
+round (`each`). The same round fired alone gives the same values (the random seed is per
+round, target and line), so a forced round also takes its results from the run of all rounds
+with the same key. The page never makes a forced result from a run that does not hold that
+round. Only the store keeps `each`.
+
+Before each queue, the page deletes the runs whose newest result is older than 24 hours.
+Then, while there are more than 40 runs or they take more than about 100 MB, it deletes the
+run that it used least recently. A full queue takes about 1.2 MB with one round, and up to
+about 11 MB with 11 rounds.
+
 The panel at the top right shows the shooter's gun and each round that the simulation fires:
 type, calibre, mass, muzzle speed, flat penetration at 500 m and filler. The **best** column
 counts the targets on which each round gave the best score. When you hover a card, the panel
@@ -99,8 +124,9 @@ fire the best of all rounds.
 each target: 40, 80, 160, 384 or 768. The default is 160. More lines give a finer result and
 take longer (see [What the simulation does](#what-the-simulation-does) and [Speed](#speed)).
 The page keeps the choice in `localStorage`. A change starts the queue of the shooter again
-with the new count, also when the queue is paused. The page then drops all results of the old
-count. The forced round stays. A new shooter or a new open keeps the count.
+with the new count, also when the queue is paused. The results of the old count stay in the
+store (see [Kept results](#kept-results)). The forced round stays. A new shooter or a new open
+keeps the count.
 
 **Workers** in the bar under the header sets the number of compute workers (Web Workers) that
 run the shots. One more worker, the manager, reads the game files and runs the queue (see
@@ -132,7 +158,7 @@ one runs and the others wait; 1 to 8, default 2; the manager uses 2 for other va
 
     go run ./cmd/shotsim -data <install or datamine> us_m4a2_sherman germ_pzkpfw_vi_ausf_h1_tiger
 
-prints the result JSON that the page shows. `-lines` sets the shot lines a round, as **Shots**
+prints the result JSON that the page shows, with the result of each round in `each`. `-lines` sets the shot lines a round, as **Shots**
 does in the page (default 160).
 
 ## Layout
@@ -162,7 +188,8 @@ does in the page (default 160).
   the manager's wasm and reads the chosen folder. `src/compute.ts` runs the compute wasm.
   `src/app.ts` is the page, the pool of compute workers, the remembered folder, and the
   dropped or picked folder in browsers without the File System Access API. It draws
-  and passes the user's actions to the manager. `src/types.ts` has the shapes of the JSON and
+  and passes the user's actions to the manager. `src/store.ts` keeps the remembered folder
+  and the kept results in IndexedDB. `src/types.ts` has the shapes of the JSON and
   of the worker messages. `src/wasm.d.ts` and `src/fs-access.d.ts` declare the wasm APIs and
   the parts of the File System Access API that the TypeScript DOM types do not have.
 - `cmd/build` bundles `web/` into `dist/` with esbuild.
@@ -305,7 +332,10 @@ The page runs two wasm binaries, each in its own kind of Web Worker.
   files, the language files, the trees, the tank packs, and it loads the vehicles. It also
   runs the queue: the order outwards from the shooter's BR, the forced round, the pause, the
   changes of shooter, round and line count, and a queue number that drops the answers of an old queue. It
-  gives the targets to the compute workers and collects the results.
+  gives the targets to the compute workers and collects the results. The page owns the choice
+  of shooter, round and line count and sends it in one message. Each new queue waits until
+  the page gives the targets that it has kept results for; the manager counts them as done
+  and does not run them.
 - **The compute workers** (`compute.wasm`) read one part of one file per target, and no other
   file. Each one gets the global tables once per open (28 KB), the shooter and the line count
   once per queue, and

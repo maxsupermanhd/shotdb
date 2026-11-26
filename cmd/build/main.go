@@ -1,15 +1,20 @@
 // Command build bundles the page in web/ into dist/ with esbuild. It does not
 // check types: esbuild only strips them. build.sh puts manager.wasm,
-// compute.wasm and wasm_exec.js into dist/ first.
+// compute.wasm and wasm_exec.js into dist/ first. The bundles get BUILD_ID,
+// a hash of the two wasm files: the page keeps shot results only for the
+// same simulation code.
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/evanw/esbuild/pkg/api"
@@ -25,6 +30,15 @@ func main() {
 }
 
 func build(out string, minify bool) error {
+	h := sha256.New()
+	for _, name := range []string{"manager.wasm", "compute.wasm"} {
+		b, err := os.ReadFile(filepath.Join(out, name))
+		if err != nil {
+			return err
+		}
+		h.Write(b)
+	}
+	id := hex.EncodeToString(h.Sum(nil))[:16]
 	// app.ts starts the workers as new URL("./manager.js", import.meta.url) and "./compute.js", so the names must stay fixed.
 	r := api.Build(api.BuildOptions{
 		EntryPointsAdvanced: []api.EntryPoint{
@@ -41,6 +55,7 @@ func build(out string, minify bool) error {
 		MinifyIdentifiers: minify,
 		MinifySyntax:      minify,
 		LogLevel:          api.LogLevelWarning,
+		Define:            map[string]string{"BUILD_ID": strconv.Quote(id)},
 		Write:             true,
 	})
 	if len(r.Errors) > 0 {

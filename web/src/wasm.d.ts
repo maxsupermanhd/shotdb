@@ -24,3 +24,6 @@ declare var compute: {
   // JSON of a SimResult or a SimError
   simulate(packet: Uint8Array, collision: Uint8Array): string | undefined;
 };
+
+// A hash of manager.wasm and compute.wasm that cmd/build puts in the bundles.
+declare const BUILD_ID: string;

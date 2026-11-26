@@ -1,7 +1,8 @@
 // Tech trees and names from the opened game data, unit icons from the wiki's static content; shot results from the Go simulation.
 // The manager worker (manager.wasm) reads the game files and runs the queue. It hands the targets to a pool of compute
 // workers (compute.wasm) over MessagePorts. The page only draws and passes the user's actions to the manager.
-import type { Card, ComputeFatal, FromManager, GameInfo, Grid, Outcome, Plate, Progress, Rounds, Source, TargetResult, ToManager, Tree, Unit } from "./types";
+import * as store from "./store";
+import type { Card, Choice, ComputeFatal, FromManager, GameInfo, Grid, Outcome, Plate, Progress, Rounds, Shell, SimResult, Source, TargetResult, ToManager, Tree, Unit } from "./types";
 
 const RANKS = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"];
 const OUTCOMES: Outcome[] = ["kill", "pen", "shatter", "ricochet", "nonpen"];
@@ -15,13 +16,16 @@ const state = {
   nations: nationsParam ? new Set(nationsParam.split(",")) : null as Set<string> | null, // null: all
   game: new Map<string, Unit>(), // from the opened game data
   results: new Map<string, TargetResult>(),
+  kept: new Set<string>(), // the results that came from the store
   rounds: null as Rounds | null, // of the shooter
   round: -1, // the only round to fire, or -1 for the best of all
   lines: 0, // shot lines a round on each target, in the shown queue
   queue: [] as string[], // in the manager's order
   started: new Set<string>(), // targets that a compute worker holds
   gen: 0, // the manager's queue; messages of other queues are dropped
-  progress: { done: 0, total: 0, running: 0, ms: 0, paused: false, wins: null } as Progress,
+  run: "", // the key of the queue's results in the store, "" when they are not kept
+  data: { source: "", version: "" }, // of the game data of the queue
+  progress: { done: 0, total: 0, running: 0, paused: false } as Progress,
   stopped: "", // why the queue stopped, when the manager failed
   byLabel: new Map<string, string>(),
 };
@@ -42,8 +46,9 @@ function startManager() {
   manager.onerror = (e) => managerFailed(e.message || "the manager did not load");
   // speed: targets that a compute worker holds at once, one runs and the others wait; the manager keeps 2 for a bad value
   tell({ op: "hold", n: Number(params.get("speed") ?? 2) });
-  // the manager keeps its default for a count that it does not have
-  tell({ op: "lines", n: Number(localStorage.getItem("shotdb.lines")) });
+  // The choice before a failure goes to the new manager: it keeps it for the next open.
+  // The manager keeps its default for a count that it does not have.
+  tell({ op: "run", shooter: state.shooter, round: state.round, lines: state.lines || Number(localStorage.getItem("shotdb.lines")) });
 }
 startManager();
 
@@ -92,9 +97,13 @@ function setupLines() {
   const select = $<HTMLSelectElement>("#lines");
   select.addEventListener("change", () => {
     localStorage.setItem("shotdb.lines", select.value);
-    tell({ op: "lines", n: Number(select.value) });
+    run({ shooter: state.shooter, round: state.round, lines: Number(select.value) });
   });
 }
+
+const run = (c: Choice) => tell({ op: "run", ...c });
+// the count in the Shots box
+const lines = () => Number($<HTMLSelectElement>("#lines").value) || state.lines;
 
 // A dropped worker stops at once: the manager puts its targets back in the queue.
 function setWorkers(n: number) {
@@ -174,15 +183,19 @@ function onManager(msg: FromManager) {
       }
       break;
     case "result":
-      if ("result" in msg) restarts = 0;
       state.started.delete(msg.target);
+      if ("result" in msg) {
+        restarts = 0;
+        // errors are not kept: the next run tries again
+        if (state.run) store.put(state.run, msg.target, JSON.stringify(msg.result)).catch((err) => console.warn(`cannot keep the result: ${message(err)}`));
+        delete msg.result.each; // only the store needs it
+      }
       state.results.set(msg.target, "result" in msg ? msg.result : { target: msg.target, error: msg.error });
       paint(msg.target);
       break;
     case "progress": {
       const { op: _op, gen: _gen, ...p } = msg;
       state.progress = p;
-      document.querySelectorAll<HTMLElement>("#rounds .r-wins").forEach((el, i) => (el.textContent = String(p.wins?.[i] ?? 0)));
       progress();
       if (p.total && p.done >= p.total && !pinned) pinHover();
       break;
@@ -230,7 +243,8 @@ function setupTrees() {
   $("#rounds").addEventListener("click", (e) => {
     const row = (e.target as Element).closest<HTMLElement>(".round");
     if (!row) return;
-    tell({ op: "round", index: Number(row.dataset.index) });
+    const i = Number(row.dataset.index);
+    run({ shooter: state.shooter, round: state.round === i ? -1 : i, lines: lines() });
   });
   $("#pause").addEventListener("click", () => tell({ op: "pause" }));
   main.innerHTML = `<p class="empty">Open the War Thunder install folder to show the research trees.</p>`;
@@ -531,7 +545,7 @@ async function installFiles(root: FileSystemDirectoryEntry) {
 async function restore() {
   let handle: FileSystemDirectoryHandle | undefined;
   try {
-    handle = await handleStore("get");
+    handle = await store.folder("get");
   } catch (err) {
     return setStatus(`Cannot read the remembered folder: ${message(err)}`, true);
   }
@@ -558,7 +572,7 @@ async function remember(handle: FileSystemDirectoryHandle | null) {
   saved = handle;
   showSaved(false);
   try {
-    await (handle ? handleStore("put", handle) : handleStore("delete"));
+    await (handle ? store.folder("put", handle) : store.folder("delete"));
   } catch (err) {
     setStatus(`Cannot remember the folder: ${message(err)}`, true);
   }
@@ -569,29 +583,6 @@ function showSaved(prompt: boolean) {
   $("#forget").hidden = !saved;
   $("#reopen").hidden = !prompt;
   if (prompt && saved) $("#reopen").textContent = `Reopen ${saved.name}`;
-}
-
-// One FileSystemDirectoryHandle in IndexedDB.
-function handleStore(op: "get" | "put" | "delete", handle?: FileSystemDirectoryHandle) {
-  return new Promise<FileSystemDirectoryHandle | undefined>((resolve, reject) => {
-    const req = indexedDB.open("shotdb", 1);
-    req.onupgradeneeded = () => req.result.createObjectStore("folder");
-    req.onerror = () => reject(req.error);
-    req.onsuccess = () => {
-      const db = req.result;
-      const tx = db.transaction("folder", op === "get" ? "readonly" : "readwrite");
-      const store = tx.objectStore("folder");
-      const r: IDBRequest = op === "get" ? store.get("game") : op === "put" ? store.put(handle, "game") : store.delete("game");
-      tx.oncomplete = () => {
-        db.close();
-        resolve(r.result);
-      };
-      tx.onerror = () => {
-        db.close();
-        reject(tx.error);
-      };
-    };
-  });
 }
 
 async function openSource(src: Source, label: string) {
@@ -662,8 +653,9 @@ function shootable(id: string) {
   return state.game.has(id);
 }
 
+// A new shooter fires the best of all rounds.
 function selectShooter(id: string) {
-  tell({ op: "shooter", id });
+  run({ shooter: id, round: id === state.shooter ? state.round : -1, lines: lines() });
 }
 
 function shooterInfo(note = "") {
@@ -680,9 +672,12 @@ function newQueue(q: Extract<FromManager, { op: "queue" }>) {
   $<HTMLSelectElement>("#lines").value = String(q.lines);
   state.rounds = q.rounds ? { range: q.range!, rounds: q.rounds } : null;
   state.queue = q.targets ?? [];
+  if (q.source !== undefined) state.data = { source: q.source, version: q.version ?? "" };
+  state.run = state.queue.length ? runKey(state) : "";
   state.started.clear();
   state.results.clear();
-  state.progress = { done: 0, total: state.queue.length, running: 0, ms: 0, paused: false, wins: null };
+  state.kept.clear();
+  state.progress = { done: 0, total: state.queue.length, running: 0, paused: false };
   state.stopped = "";
   pinned = false;
   for (const els of cards.values()) {
@@ -707,6 +702,47 @@ function newQueue(q: Extract<FromManager, { op: "queue" }>) {
   roundsPanel();
   if (q.error) $("#rounds").textContent = `Cannot read the rounds: ${q.error}`;
   progress();
+  if (state.queue.length) void fromStore(q.gen);
+}
+
+// The key of the results of a choice in the store: all that changes a result.
+function runKey(c: Choice) {
+  return JSON.stringify([BUILD_ID, state.data.source, state.data.version, c.shooter, c.round, c.lines]);
+}
+
+// The results of choice c that the store has. A forced round also takes the targets of the run of all rounds,
+// whose results hold each round. rounds gives the shell of such a result; without it, the shell is null.
+async function stored(c: Choice, rounds?: Shell[]) {
+  const out = new Map<string, SimResult>();
+  for (const [target, s] of await store.results(runKey(c))) out.set(target, JSON.parse(s));
+  if (c.round < 0) return out;
+  for (const [target, s] of await store.results(runKey({ ...c, round: -1 }))) {
+    if (out.has(target)) continue;
+    const all: SimResult = JSON.parse(s);
+    const r = all.each?.[c.round];
+    if (!r || all.each!.length !== (rounds?.length ?? all.each!.length)) continue;
+    out.set(target, { shooter: all.shooter, target, shell: rounds?.[c.round] ?? null, views: r.views, score: r.score, ms: r.ms, shots: r.shots });
+  }
+  return out;
+}
+
+// Shows the results of queue gen that the store has, and starts the queue for the other targets.
+async function fromStore(gen: number) {
+  let have = new Map<string, SimResult>();
+  try {
+    await store.prune(state.run);
+    have = await stored(state, state.rounds?.rounds);
+  } catch (err) {
+    console.warn(`cannot read the kept results: ${message(err)}`);
+  }
+  if (gen !== state.gen) return;
+  for (const [id, r] of have) {
+    delete r.each;
+    state.results.set(id, r);
+    state.kept.add(id);
+    paint(id);
+  }
+  tell({ op: "go", gen, done: [...have.keys()] });
 }
 
 // Once the queue is done, the tooltip of the hover parameter's unit stays on.
@@ -745,7 +781,7 @@ function roundsPanel() {
     const filler = s.filler ? `${+(s.filler * 1000).toFixed(1)} g ${esc(s.explosive.replaceAll("_", " "))}` : "";
     return g + `<tr class="round${i === state.round ? " forced" : ""}" data-index="${i}"><td title="${esc(s.name)}">${esc(s.name)}</td>`
       + `<td>${shellType(s.type)}</td><td>${+s.caliber.toFixed(1)} mm</td><td>${mass}</td><td>${s.speed} m/s</td>`
-      + `<td>${Math.round(s.pen)} mm</td><td>${filler}</td><td class="r-wins">${state.progress.wins?.[i] ?? 0}</td></tr>`;
+      + `<td>${Math.round(s.pen)} mm</td><td>${filler}</td><td class="r-wins">0</td></tr>`;
   }).join("");
   panel.innerHTML = `<div class="rounds-head">${head}</div><div class="rounds-list"><table>`
     + `<tr><th></th><th>type</th><th>calibre</th><th>mass</th><th>muzzle</th><th title="flat penetration at ${r.range} m">pen</th><th>filler</th><th title="targets this round was best on">best</th></tr>`
@@ -762,7 +798,18 @@ function hideTip() {
 }
 
 function progress() {
-  const { done, total, running, ms, paused, at } = state.progress;
+  const { done, total, running, paused, at } = state.progress;
+  // the wins of each round, also on the kept results, and the time of the results of this queue
+  const wins: number[] = [];
+  let ms = 0, n = 0;
+  for (const [id, r] of state.results) {
+    if ("error" in r || !r.shell) continue;
+    wins[r.shell.index] = (wins[r.shell.index] ?? 0) + 1;
+    if (state.kept.has(id)) continue;
+    ms += r.ms;
+    n++;
+  }
+  document.querySelectorAll<HTMLElement>("#rounds .round").forEach((el) => (el.querySelector(".r-wins")!.textContent = String(wins[Number(el.dataset.index)] ?? 0)));
   const stopped = state.stopped || (!pool.length && done < total ? "all compute workers failed. Change the number of workers to start new ones." : "");
   const pause = $<HTMLButtonElement>("#pause");
   pause.disabled = done >= total || !!stopped;
@@ -777,9 +824,11 @@ function progress() {
     text.textContent = "Pick a shooter to run the shots";
     return;
   }
-  const avg = done ? ` · ${Math.round(ms / done)} ms a pair` : "";
+  const avg = n ? ` · ${Math.round(ms / n)} ms a pair` : "";
   const where = paused ? ` · paused${running ? `, ${running} still running` : ""}` : at !== undefined ? ` · now at BR ${at.toFixed(1)}` : "";
-  text.textContent = done < total ? `${done} / ${total}${where}${avg}` : `${total} / ${total} done${avg}`;
+  const kept = state.kept.size ? ` · ${state.kept.size} kept` : "";
+  text.textContent = done < total ? `${done} / ${total}${kept}${where}${avg}` : `${total} / ${total} done${kept}${avg}`;
+  text.title = state.kept.size ? `${state.kept.size} results came from the results kept in this browser (valid for one day), the others ran now` : "";
 }
 
 function paint(id: string) {
@@ -843,7 +892,7 @@ function showTooltip(el: HTMLElement, pinned = false) {
           + `<div class="tt-parts">${parts} <span class="muted">of ${total}</span></div>`
           + `<div class="tt-plates">${v.plates.map(plateText).join(" · ")}</div>`;
       }).join("")
-      + `<div class="tt-score">Lethality <b>${Math.round(res.score * 100)}%</b> <span class="muted">(${res.shots} shots on the collision model, ${res.ms} ms; plates: first armour met, mean thickness, shots)</span></div>`;
+      + `<div class="tt-score">Lethality <b>${Math.round(res.score * 100)}%</b> <span class="muted">(${res.shots} shots on the collision model, ${state.kept.has(id) ? "kept from an earlier run" : `${res.ms} ms`}; plates: first armour met, mean thickness, shots)</span></div>`;
   }
   const sbr = br(state.shooter);
   const d = shootable(id) && state.shooter ? br(id) - sbr : 0;
