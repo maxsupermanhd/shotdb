@@ -26,14 +26,15 @@ body {
   font: 13px/1.35 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 
+/* brand and game data | shooter | rounds, which take the rest of the width */
 .bar {
-  display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 16px;
-  padding: 10px 16px;
+  display: grid; grid-template-columns: auto auto minmax(0, 1fr); align-items: start; gap: 8px 20px;
+  padding: 8px 16px;
   background: var(--panel);
   border-bottom: 1px solid var(--line);
 }
-.bar-left { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.bar-side { display: flex; align-items: center; gap: 10px; }
+.bar-left { display: flex; flex-direction: column; gap: 6px; min-width: 0; max-width: 340px; }
+.bar-side { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .brand { font-weight: 700; letter-spacing: .02em; font-size: 15px; }
 .open-btn {
   font: inherit; font-size: 12px; cursor: pointer;
@@ -45,33 +46,32 @@ body {
   font: inherit; font-size: 12px; cursor: pointer;
   color: var(--muted); background: none; border: 0; padding: 0; text-decoration: underline;
 }
-.data-status {
-  font-size: 12px; color: var(--muted);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
+.data-status { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 .data-status.error { color: var(--nonpen); }
 
-.picker { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.picker { display: flex; flex-direction: column; align-items: center; gap: 3px; width: min(400px, 40vw); max-width: calc(100vw - 32px); }
 .picker-label { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
 #shooter {
-  width: min(460px, 60vw);
-  padding: 8px 12px;
+  width: 100%;
+  padding: 6px 12px;
   font: inherit; font-size: 15px; text-align: center;
   color: var(--text); background: var(--page);
   border: 1px solid var(--line); border-radius: 6px;
 }
 #shooter:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
-.shooter-info { font-size: 12px; color: var(--muted); }
+.shooter-info { font-size: 12px; color: var(--muted); text-align: center; }
 
-.rounds { justify-self: end; min-width: 0; max-width: 100%; font-size: 11px; }
-.rounds-head { color: var(--muted); margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* No text is cut: the head and the names wrap. Each gun's rounds are tables of at most 4 rows side by
+   side; when they need more than about one line of tables, the list scrolls. */
+.rounds { min-width: 0; font-size: 11px; }
+.rounds-head { color: var(--muted); margin-bottom: 2px; }
 .rounds-head b { color: var(--text); font-weight: 600; }
-.rounds-list { max-height: 90px; overflow: auto; }
+.rounds-list { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 2px 20px; max-height: 96px; overflow-y: auto; }
 .rounds table { border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.rounds caption { text-align: left; color: var(--text); font-weight: 600; padding: 0 5px; }
 .rounds th { font-weight: 400; color: var(--muted); text-align: right; padding: 0 5px; white-space: nowrap; }
-.rounds th.gun { text-align: left; color: var(--text); padding-top: 2px; }
 .rounds td { padding: 1px 5px; text-align: right; white-space: nowrap; }
-.rounds td:first-child { text-align: left; max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
+.rounds td:first-child { text-align: left; white-space: normal; min-width: 7em; max-width: 14em; }
 .round { cursor: pointer; }
 .round:hover td { background: #222932; }
 .round.hl td { background: rgb(240 194 75 / .22); }
@@ -81,9 +81,10 @@ body {
 .r-wins { color: var(--accent); }
 
 /* narrow: the rounds go under the picker, over the full width */
-@media (max-width: 1240px) {
-  .bar { grid-template-columns: minmax(0, 1fr) auto; }
-  .rounds { grid-column: 1 / -1; justify-self: stretch; }
+@media (max-width: 1300px) {
+  .bar { grid-template-columns: auto minmax(0, 1fr); }
+  .picker { justify-self: center; }
+  .rounds { grid-column: 1 / -1; }
 }
 
 .subbar {
@@ -99,10 +100,10 @@ body {
 }
 .chip.on { color: var(--text); background: var(--panel); border-color: #4a5462; }
 
-.progress { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 220px; }
-.progress-track { flex: 1; max-width: 320px; height: 6px; background: var(--pending); border-radius: 3px; overflow: hidden; }
+.progress { display: flex; align-items: center; gap: 8px; flex: 1 1 320px; min-width: 0; }
+.progress-track { flex: 1 1 60px; max-width: 320px; height: 6px; background: var(--pending); border-radius: 3px; overflow: hidden; }
 .progress-fill { height: 100%; width: 0; background: var(--accent); }
-.progress-text { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.progress-text { color: var(--muted); font-variant-numeric: tabular-nums; }
 .chip:disabled { opacity: .4; cursor: default; }
 
 .settings { display: flex; gap: 20px; }

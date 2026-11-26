@@ -122,9 +122,13 @@ Then, while there are more than 40 runs or they take more than about 100 MB, it 
 run that it used least recently. A full queue takes about 1.2 MB with one round, and up to
 about 11 MB with 11 rounds.
 
-The panel at the top right shows the shooter's gun and each round that the simulation fires:
-type, calibre, mass, muzzle speed, flat penetration at 500 m and filler. The **best** column
-counts the targets on which each round gave the best score. When you hover a card, the panel
+The panel at the top right shows the shooter's guns and each round that the simulation fires:
+type, calibre (mm), mass (kg), muzzle speed (m/s), flat penetration at 500 m (mm) and filler
+(g and explosive). Each gun's rounds are in tables of at most four rows, side by side, so that
+the header stays low. No text is cut: names wrap, and when the tables need more than about one
+line, the list scrolls. Below a window width of 1300 px the panel goes under the shooter box.
+A long shooter name makes the box wider. The **best** column
+counts the targets on which each round gave the best score (also on kept results). When you hover a card, the panel
 marks the round that the card shows. Click a round to fire only that round. Click it again to
 fire the best of all rounds.
 

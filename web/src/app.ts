@@ -759,6 +759,10 @@ function newQueue(q: Extract<FromManager, { op: "queue" }>) {
     $("#trees").classList.add("idle");
   } else {
     input.value = pickerLabel(state.shooter);
+    // a long name makes the box wider, so that the name shows in full
+    const picker = input.parentElement!;
+    picker.style.width = "";
+    if (input.scrollWidth > input.clientWidth) picker.style.width = `${picker.offsetWidth + input.scrollWidth - input.clientWidth + 4}px`;
     shooterInfo(state.rounds && !state.rounds.rounds.length ? "no gun of 20 mm or more that attacks armour" : "");
     cards.get(state.shooter)?.forEach((el) => el.classList.add("shooter"));
     $("#trees").classList.remove("idle");
@@ -833,23 +837,28 @@ function roundsPanel() {
     panel.innerHTML = `<div class="rounds-head">No gun of 20 mm or more that attacks armour</div>`;
     return;
   }
-  // with one gun its name goes in the head, else above its rounds
-  const guns = new Set(r.rounds.map((s) => s.gun));
-  let gun = guns.size === 1 ? r.rounds[0].gun : "";
-  const head = (gun ? `<b>${esc(gun)}</b>: ` : "") + (state.round >= 0
-    ? `only <b>${esc(r.rounds[state.round].name)}</b> at ${r.range} m, ${state.lines} lines · click it again for the best of all`
-    : `${r.rounds.length} rounds at ${r.range} m, ${state.lines} lines a round, the best per target · click a round to fire only it`);
-  const rows = r.rounds.map((s, i) => {
-    const g = s.gun === gun ? "" : `<tr><th class="gun" colspan="8">${esc((gun = s.gun))}</th></tr>`;
-    const mass = s.mass >= 1 ? `${s.mass.toFixed(2)} kg` : `${Math.round(s.mass * 1000)} g`;
-    const filler = s.filler ? `${+(s.filler * 1000).toFixed(1)} g ${esc(s.explosive.replaceAll("_", " "))}` : "";
-    return g + `<tr class="round${i === state.round ? " forced" : ""}" data-index="${i}"><td title="${esc(s.name)}">${esc(s.name)}</td>`
-      + `<td>${shellType(s.type)}</td><td>${+s.caliber.toFixed(1)} mm</td><td>${mass}</td><td>${s.speed} m/s</td>`
-      + `<td>${Math.round(s.pen)} mm</td><td>${filler}</td><td class="r-wins">0</td></tr>`;
-  }).join("");
-  panel.innerHTML = `<div class="rounds-head">${head}</div><div class="rounds-list"><table>`
-    + `<tr><th></th><th>type</th><th>calibre</th><th>mass</th><th>muzzle</th><th title="flat penetration at ${r.range} m">pen</th><th>filler</th><th title="targets this round was best on">best</th></tr>`
-    + rows + `</table></div>`;
+  const head = state.round >= 0
+    ? `only <b>${esc(r.rounds[state.round].name)}</b> · ${r.range} m · ${state.lines} lines <span class="hint">· click it again for the best of all</span>`
+    : `best of ${r.rounds.length} round${r.rounds.length === 1 ? "" : "s"} per target · ${r.range} m · ${state.lines} lines a round <span class="hint">· click a round to fire only it</span>`;
+  // Each gun's rounds go in tables of at most ROWS rows, side by side, so that the header stays low.
+  const ROWS = 4;
+  const tables: string[] = [];
+  for (const gun of new Set(r.rounds.map((s) => s.gun))) {
+    const list = r.rounds.filter((s) => s.gun === gun);
+    const size = Math.ceil(list.length / Math.ceil(list.length / ROWS));
+    for (let k = 0; k < list.length; k += size) {
+      const rows = list.slice(k, k + size).map((s) => {
+        const filler = s.filler ? `${+(s.filler * 1000).toFixed(1)} <span class="muted">${esc(s.explosive.replaceAll("_", " "))}</span>` : "";
+        return `<tr class="round${s.index === state.round ? " forced" : ""}" data-index="${s.index}"><td>${esc(s.name)}</td>`
+          + `<td>${shellType(s.type)}</td><td>${+s.caliber.toFixed(1)}</td><td>${s.mass.toFixed(s.mass >= 1 ? 2 : 3)}</td><td>${s.speed}</td>`
+          + `<td>${Math.round(s.pen)}</td><td>${filler}</td><td class="r-wins">0</td></tr>`;
+      }).join("");
+      tables.push(`<table><caption>${esc(gun)}</caption>`
+        + `<tr><th></th><th>type</th><th>mm</th><th>kg</th><th title="muzzle speed">m/s</th><th title="flat penetration at ${r.range} m">pen mm</th><th title="filler mass and explosive">filler g</th><th title="targets this round was best on">best</th></tr>`
+        + rows + `</table>`);
+    }
+  }
+  panel.innerHTML = `<div class="rounds-head">${head}</div><div class="rounds-list">${tables.join("")}</div>`;
 }
 
 function highlightRound(index: number) {
