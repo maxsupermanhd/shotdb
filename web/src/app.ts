@@ -4,7 +4,7 @@ import type { Card, Grid, Outcome, Plate, Replies, Reply, Request, Rounds, Sourc
 const RANKS = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"];
 const OUTCOMES: Outcome[] = ["kill", "pen", "shatter", "ricochet", "nonpen"];
 const OUTCOME_LABEL: Record<Outcome, string> = { kill: "Pen + kill", pen: "Pen, no kill", shatter: "Pen, core broke", ricochet: "Ricochet", nonpen: "No pen" };
-const TILE_MIN = 8, TILE_MAX = 66; // TILE_MAX is the height of the unit pictures
+const TILE_MIN = 8, TILE_MAX = 70; // TILE_MAX: the height of the unit pictures and the view bars
 
 const params = new URLSearchParams(location.search);
 const nationsParam = params.get("nations");
@@ -268,11 +268,9 @@ function fitCompact() {
   const tile = Math.min(TILE_MAX, Math.floor((main.parentElement!.clientWidth - 1 - (w1 - 10 * dw)) / dw));
   const w = Math.max(TILE_MIN, tile);
   width(w);
-  // The picture area is 1.5 times as high as the tile is wide: the pictures are about square
-  // and drawn up to twice the tile width, so most of their height shows.
-  const pic = Math.min(TILE_MAX, Math.round(1.5 * w));
-  main.style.setProperty("--pic", `${pic}px`);
-  note.textContent = tile >= TILE_MIN ? `${w} × ${pic + 4} px` : `does not fit at ${TILE_MIN} px: scroll`;
+  // the view bars take the bottom 4 px of the square
+  main.style.setProperty("--pic", `${w - 4}px`);
+  note.textContent = tile >= TILE_MIN ? `${w} px` : `does not fit at ${TILE_MIN} px: scroll`;
   note.title = tile >= TILE_MIN ? "" : `The shown trees need tiles below ${TILE_MIN} px to fit the window width. Show fewer nations or use a wider window.`;
 }
 
