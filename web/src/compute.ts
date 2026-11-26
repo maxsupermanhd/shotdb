@@ -52,7 +52,10 @@ async function pump() {
       } else if (p.gen !== gen) {
         reply({ gen: p.gen, target: p.target });
       } else {
-        reply({ gen: p.gen, target: p.target, result: compute.simulate(p.buf) });
+        const result = compute.simulate(p.buf);
+        // undefined when the Go program exits in the call, for example out of memory or on a stack overflow
+        if (typeof result !== "string") throw new Error(`the Go program stopped in the shot at ${p.target}`);
+        reply({ gen: p.gen, target: p.target, result });
         // lets the port deliver what waits, so that a new queue number arrives before the next target
         await new Promise((r) => setTimeout(r, 0));
       }

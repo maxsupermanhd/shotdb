@@ -347,7 +347,12 @@ func (m *manager) answer(w *worker, j job, result string) {
 		return
 	}
 	w.flight = slices.Delete(w.flight, i, i+1)
-	if j.gen != m.gen || result == "" {
+	if j.gen != m.gen {
+		return
+	}
+	// a worker skips only the targets of older queues
+	if result == "" {
+		m.finish(j.target, "", errors.New("the compute worker gave no result"))
 		return
 	}
 	var r struct {

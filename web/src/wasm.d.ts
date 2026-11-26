@@ -15,10 +15,10 @@ declare var manager: {
   message(msg: import("./types").ToManager): void;
 };
 
-// Each gives an error message, "" if none.
+// Each gives an error message, "" if none, or undefined when the Go program exits in the call.
 declare var compute: {
-  tables(packet: Uint8Array): string;
-  shooter(packet: Uint8Array, round: number): string; // round -1: the best of all
+  tables(packet: Uint8Array): string | undefined;
+  shooter(packet: Uint8Array, round: number): string | undefined; // round -1: the best of all
   // JSON of a SimResult or a SimError
-  simulate(packet: Uint8Array): string;
+  simulate(packet: Uint8Array): string | undefined;
 };
