@@ -52,7 +52,7 @@ async function pump() {
         if (err) fatal(`tables: ${err}`);
       } else if (p.op === "shooter") {
         if (p.gen !== gen) continue;
-        const err = compute.shooter(p.buf, p.round);
+        const err = compute.shooter(p.buf, p.round, p.sample);
         if (err) fatal(`shooter: ${err}`);
       } else if (p.gen !== gen) {
         reply({ gen: p.gen, target: p.target });

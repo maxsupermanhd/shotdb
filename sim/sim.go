@@ -16,16 +16,15 @@ import (
 
 const Range = 500.0 // m
 
-// Views in result order: their weight in the score and the shooter's bearings
-// from the target's nose, in degrees.
+// Views in result order, with their weight in the score. Sample gives the
+// bearings of each view.
 var Views = []struct {
-	Name     string
-	Weight   float64
-	Bearings []float64
+	Name   string
+	Weight float64
 }{
-	{"front", 0.5, []float64{-20, 0, 20}},
-	{"side", 0.3, []float64{-100, -80, 80, 100}},
-	{"rear", 0.2, []float64{160, 180, 200}},
+	{"front", 0.5},
+	{"side", 0.3},
+	{"rear", 0.2},
 }
 
 type Outcome string
@@ -106,14 +105,17 @@ func (sh *shell) info(index int) ShellInfo {
 }
 
 // Simulate fires the shooter a at the target v, on the target's collision
-// nodes. With round -1 it fires every round of the shooter and keeps the best,
-// else only that round.
-func Simulate(d *dm.Tables, a, v *dm.Vehicle, nodes []geom.Node, round int) (Result, error) {
+// nodes, along the shot lines of s. With round -1 it fires every round of the
+// shooter and keeps the best, else only that round.
+func Simulate(d *dm.Tables, a, v *dm.Vehicle, nodes []geom.Node, round int, s Sample) (Result, error) {
 	start := time.Now()
 	if round >= len(a.Shells) {
 		return Result{}, fmt.Errorf("%s has no round %d", a.ID, round)
 	}
-	t := newTarget(v, nodes)
+	if len(s.Bearings) != len(Views) {
+		return Result{}, fmt.Errorf("the sample has %d views, not %d", len(s.Bearings), len(Views))
+	}
+	t := newTarget(v, nodes, s)
 	best := Result{}
 	bestPen := -1.0
 	shots := 0

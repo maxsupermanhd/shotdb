@@ -105,6 +105,7 @@ body {
 .progress-text { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .chip:disabled { opacity: .4; cursor: default; }
 
+.settings { display: flex; gap: 20px; }
 .workers { color: var(--muted); font-size: 12px; }
 .workers select { font: inherit; color: var(--text); background: var(--page); border: 1px solid var(--line); border-radius: 4px; }
 

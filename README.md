@@ -95,6 +95,13 @@ counts the targets on which each round gave the best score. When you hover a car
 marks the round that the card shows. Click a round to fire only that round. Click it again to
 fire the best of all rounds.
 
+**Shots** in the bar under the header sets the number of shot lines that each round fires at
+each target: 40, 80, 160, 384 or 768. The default is 160. More lines give a finer result and
+take longer (see [What the simulation does](#what-the-simulation-does) and [Speed](#speed)).
+The page keeps the choice in `localStorage`. A change starts the queue of the shooter again
+with the new count, also when the queue is paused. The page then drops all results of the old
+count. The forced round stays. A new shooter or a new open keeps the count.
+
 **Workers** in the bar under the header sets the number of compute workers (Web Workers) that
 run the shots. One more worker, the manager, reads the game files and runs the queue (see
 [Workers](#workers)). The default is half of the CPU threads, at most 8. The page keeps the
@@ -125,7 +132,8 @@ one runs and the others wait; 1 to 8, default 2; the manager uses 2 for other va
 
     go run ./cmd/shotsim -data <install or datamine> us_m4a2_sherman germ_pzkpfw_vi_ausf_h1_tiger
 
-prints the result JSON that the page shows.
+prints the result JSON that the page shows. `-lines` sets the shot lines a round, as **Shots**
+does in the page (default 160).
 
 ## Layout
 
@@ -183,10 +191,25 @@ no flag that tells these from the other `showOnlyWhenBought` vehicles that the w
 ## What the simulation does
 
 Each target is shot on its real collision model at 500 m. For each view the shooter stands
-at several bearings from the target's nose (front -20, 0, 20; side -100, -80, 80, 100; rear
-160, 180, 200 degrees), at 0 and 6 degrees down. Each direction lays a 28-cell grid over the
-silhouette and keeps 8 of the cells that hit, spread evenly: 48 shot lines for the front,
-64 for the side, 48 for the rear, per round. Every round of the shooter is fired along every
+at several bearings from the target's nose, at several elevations (degrees down). Each
+bearing and elevation is one shot direction. Each direction lays a 28-cell grid over the
+silhouette and keeps n of the cells that hit. **Shots** sets the bearings, the elevations
+and n:
+
+| shots | front bearings | side bearings | rear bearings | elevations | n | front, side, rear lines |
+| --- | --- | --- | --- | --- | --- | --- |
+| 40 | -20, 0, 20 | ±80, ±100 | 160, 180, 200 | 3 | 4 | 12, 16, 12 |
+| 80 | -20, 0, 20 | ±80, ±100 | 160, 180, 200 | 0, 6 | 4 | 24, 32, 24 |
+| 160 | -20, 0, 20 | ±80, ±100 | 160, 180, 200 | 0, 6 | 8 | 48, 64, 48 |
+| 384 | -20 to 20, every 10 | ±80, ±90, ±100 | 160 to 200, every 10 | 0, 3, 6 | 8 | 120, 144, 120 |
+| 768 | -20 to 20, every 10 | ±80, ±90, ±100 | 160 to 200, every 10 | 0, 3, 6 | 16 | 240, 288, 240 |
+
+The front and the rear get 30 to 31 % of the lines at each step, the side 38 to 40 %. The
+grid cells that hit are put in column order and cut into n equal runs. The direction keeps the
+middle cell of each run, so the lines spread across the width of the silhouette. A larger
+n puts the lines closer together. 384 and 768 also add the bearings between the old ones and
+an elevation of 3 degrees. A direction that hits the vehicle in fewer than n cells keeps all of
+them. On the 2.61.0.42 install no target has such a direction, also at 768. Every round of the shooter is fired along every
 line and the round with the best score is shown. The random parts (dispersion, ricochet
 rolls, fragments, damage effects) use a fixed seed per round, target and line, so a result is
 the same every run.
@@ -281,10 +304,11 @@ The page runs two wasm binaries, each in its own kind of Web Worker.
 - **The manager** (`manager.wasm`, one worker) reads all game files: the containers, the BLK
   files, the language files, the trees, the tank packs, and it loads the vehicles. It also
   runs the queue: the order outwards from the shooter's BR, the forced round, the pause, the
-  changes of shooter and round, and a queue number that drops the answers of an old queue. It
+  changes of shooter, round and line count, and a queue number that drops the answers of an old queue. It
   gives the targets to the compute workers and collects the results.
 - **The compute workers** (`compute.wasm`) read one part of one file per target, and no other
-  file. Each one gets the global tables once per open (28 KB), the shooter once per queue, and
+  file. Each one gets the global tables once per open (28 KB), the shooter and the line count
+  once per queue, and
   then one packet per target: the target's damage parts, crew and racks (68 KB on average,
   153 KB at most). With the packet comes a Blob of the target's collision resource in its
   tank pack. The compute worker starts to read the Blob when the target arrives, and it parses
@@ -315,8 +339,8 @@ Measured on the 2.61.0.37 install:
   average. Modern pairs are the slowest: Leopard 2A6 on modern targets about 1.0 s, M1A2 on
   T-90A 1.1 s; WWII pairs 0.43 to 0.56 s. Wasm runs about 3.4 times slower than native.
 
-The cost is mostly the shot lines (48 to 64 per view and round) and the fragment rays behind
-each perforation. A compute worker builds the mesh, the BVH and the lines of each target, and
+The cost is mostly the shot lines (160 a round at the default **Shots**) and the fragment rays
+behind each perforation. A compute worker builds the mesh, the BVH and the lines of each target, and
 keeps them only while it fires at it. A queue fires at each target once.
 
 In the page with the manager and the compute workers, on the 2.61.0.42 install (headless
@@ -333,6 +357,19 @@ time that a compute worker waits for a target.
 | BT-5 | 4 | 118 s | 372 ms | 0 % | 12 % |
 | BT-5 | 8 | 63 s | 398 ms | 0 % | 27 % |
 | BT-5 | 16 | 52 s | 653 ms | 0 % | 59 % |
+
+For each **Shots** step, the M4A2 queue with 8 compute workers (on the same machine and
+install). "Memory" is the wasm memory of the manager and of all compute workers at the end of
+the queue:
+
+| shots | shots in the queue | wall time | ms a pair | memory | one compute worker |
+| --- | --- | --- | --- | --- | --- |
+| 40 | 200 640 | 41 s | 255 ms | 467 MB | 29 to 36 MB |
+| 160 | 802 560 | 83 s | 523 ms | 463 MB | 29 to 34 MB |
+| 768 | 3 852 288 | 279 s | 1764 ms | 490 MB | 33 to 38 MB |
+
+The time does not grow as fast as the lines, as each pair also reads and parses the collision
+resource and builds the mesh, the BVH and the grids. The manager takes 211 MB at each step.
 
 The manager prepares a target in 11 ms with 4 compute workers and in 25 ms with 16, as the
 threads are busier: it loads the unit, finds the collision resource and encodes the packet.

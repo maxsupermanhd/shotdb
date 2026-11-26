@@ -44,7 +44,7 @@ func (t *target) index(name string) int32 {
 	return -1
 }
 
-func newTarget(v *dm.Vehicle, nodes []geom.Node) *target {
+func newTarget(v *dm.Vehicle, nodes []geom.Node, s Sample) *target {
 	t := &target{v: v, byName: map[string]int32{}}
 	var tris []geom.Tri
 	for i, n := range nodes {
@@ -70,8 +70,8 @@ func newTarget(v *dm.Vehicle, nodes []geom.Node) *target {
 			t.count = append(t.count, c.Count)
 		}
 	}
-	for _, view := range Views {
-		t.views = append(t.views, t.lines(view.Bearings))
+	for _, b := range s.Bearings {
+		t.views = append(t.views, t.lines(b, s.Elevations, s.PerDir))
 	}
 	return t
 }
@@ -119,19 +119,48 @@ func (t *target) spans(o, d vec, maxT float64, hits *[]geom.Hit, out []span) []s
 	return out
 }
 
-// Grid of the silhouette for each shot direction, and the lines kept of it.
-const (
-	gridCells   = 28 // cells across the larger side of the silhouette
-	linesPerDir = 8
+// Cells across the larger side of the silhouette, in the grid of each shot direction.
+const gridCells = 28
+
+// Sample sets the shot lines of a target. In each view, each bearing and each
+// elevation give one shot direction, and each direction keeps PerDir lines.
+type Sample struct {
+	Bearings   [][]float64 // per view, in Views order: degrees from the nose
+	Elevations []float64   // degrees down from the horizontal
+	PerDir     int
+}
+
+// Lines gives the shot lines of one round. A direction that hits the vehicle
+// in fewer grid cells than PerDir keeps fewer lines.
+func (s Sample) Lines() int {
+	n := 0
+	for _, b := range s.Bearings {
+		n += len(b) * len(s.Elevations) * s.PerDir
+	}
+	return n
+}
+
+var (
+	baseBearings = [][]float64{{-20, 0, 20}, {-100, -80, 80, 100}, {160, 180, 200}}
+	fineBearings = [][]float64{{-20, -10, 0, 10, 20}, {-100, -90, -80, 80, 90, 100}, {160, 170, 180, 190, 200}}
 )
 
-// Elevations of the shot line, degrees down from the horizontal.
-var elevations = []float64{0, 6}
+// Samples are the steps of the shot count, the fewest lines first.
+var Samples = []Sample{
+	{baseBearings, []float64{3}, 4},
+	{baseBearings, []float64{0, 6}, 4},
+	{baseBearings, []float64{0, 6}, 8},
+	{fineBearings, []float64{0, 3, 6}, 8},
+	{fineBearings, []float64{0, 3, 6}, 16},
+}
+
+// DefaultSample is the index in Samples of the default step: 160 lines.
+const DefaultSample = 2
 
 // lines picks shot lines for a view: for each bearing and elevation, a grid
 // over the silhouette, of which the cells that hit the vehicle are taken at an
 // even stride.
-func (t *target) lines(bearings []float64) []sample {
+func (t *target) lines(bearings, elevations []float64, perDir int) []sample {
 	var out []sample
 	var buf []geom.Hit
 	mid := geom.Scale(geom.Add(t.mesh.Min, t.mesh.Max), 0.5)
@@ -168,7 +197,7 @@ func (t *target) lines(bearings []float64) []sample {
 					}
 				}
 			}
-			n := min(linesPerDir, len(hit))
+			n := min(perDir, len(hit))
 			for i := range n {
 				// Centre of each of n equal runs of the hit cells.
 				out = append(out, hit[(2*i+1)*len(hit)/(2*n)])

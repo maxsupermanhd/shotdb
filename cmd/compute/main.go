@@ -5,9 +5,10 @@
 // packets of package packet, and the page gives it the bytes of each
 // target's collision resource.
 //
-//	compute.tables(bytes)               -> error message, "" if none
-//	compute.shooter(bytes, round)       -> error message, "" if none; round -1 for the best
-//	compute.simulate(bytes, collision)  -> JSON of a sim.Result, or {target, error}
+//	compute.tables(bytes)                 -> error message, "" if none
+//	compute.shooter(bytes, round, sample) -> error message, "" if none; round -1 for the best,
+//	                                         sample an index in sim.Samples
+//	compute.simulate(bytes, collision)    -> JSON of a sim.Result, or {target, error}
 //
 // Each call is synchronous. A panic comes back as an error.
 package main
@@ -29,6 +30,7 @@ var (
 	tables  *dm.Tables
 	shooter *dm.Vehicle
 	round   = -1
+	sample  = sim.Samples[sim.DefaultSample]
 )
 
 func main() {
@@ -46,6 +48,11 @@ func main() {
 	api.Set("shooter", js.FuncOf(func(_ js.Value, args []js.Value) any {
 		err := guard(func() (err error) {
 			round = args[1].Int()
+			i := args[2].Int()
+			if i < 0 || i >= len(sim.Samples) {
+				return fmt.Errorf("no sample %d", i)
+			}
+			sample = sim.Samples[i]
 			shooter, err = packet.ReadShooter(bytesOf(args[0]))
 			return err
 		})
@@ -67,7 +74,7 @@ func main() {
 			if tables == nil || shooter == nil {
 				return errors.New("no tables or shooter yet")
 			}
-			r, err := sim.Simulate(tables, shooter, v, nodes, round)
+			r, err := sim.Simulate(tables, shooter, v, nodes, round, sample)
 			if err != nil {
 				return err
 			}

@@ -36,7 +36,10 @@
     <button id="compact" class="chip" title="Show each vehicle as a small square picture, sized so that all shown trees fit the window">Compact</button>
     <span id="compact-note" class="compact-note"></span>
   </div>
-  <label class="workers" title="Compute workers (Web Workers) that run the shots side by side. One more worker reads the game files and hands each a target at a time.">Workers <select id="workers"></select></label>
+  <div class="settings">
+    <label class="workers" title="Shot lines a round on each target: front, side and rear together. More lines give a finer result and take longer. A change starts the queue again.">Shots <select id="lines"></select></label>
+    <label class="workers" title="Compute workers (Web Workers) that run the shots side by side. One more worker reads the game files and hands each a target at a time.">Workers <select id="workers"></select></label>
+  </div>
   <div class="legend">
     <span class="legend-scale"></span>
     <span>no pen</span><span class="legend-arrow">&rarr;</span><span>kills</span>

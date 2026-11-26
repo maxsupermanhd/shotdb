@@ -17,6 +17,7 @@ const state = {
   results: new Map<string, TargetResult>(),
   rounds: null as Rounds | null, // of the shooter
   round: -1, // the only round to fire, or -1 for the best of all
+  lines: 0, // shot lines a round on each target, in the shown queue
   queue: [] as string[], // in the manager's order
   started: new Set<string>(), // targets that a compute worker holds
   gen: 0, // the manager's queue; messages of other queues are dropped
@@ -41,6 +42,8 @@ function startManager() {
   manager.onerror = (e) => managerFailed(e.message || "the manager did not load");
   // speed: targets that a compute worker holds at once, one runs and the others wait; the manager keeps 2 for a bad value
   tell({ op: "hold", n: Number(params.get("speed") ?? 2) });
+  // the manager keeps its default for a count that it does not have
+  tell({ op: "lines", n: Number(localStorage.getItem("shotdb.lines")) });
 }
 startManager();
 
@@ -65,6 +68,7 @@ const icons = new IntersectionObserver((entries) => {
   }
 }, { root: $("#trees").parentElement, rootMargin: "400px" });
 setupTrees();
+setupLines();
 setupCompact();
 setupPicker();
 setupOpen();
@@ -81,6 +85,15 @@ function setupWorkers() {
     setWorkers(Number(select.value));
   });
   setWorkers(Number(select.value));
+}
+
+// The manager gives the counts in its first message, "samples". A change starts the queue of the shooter again.
+function setupLines() {
+  const select = $<HTMLSelectElement>("#lines");
+  select.addEventListener("change", () => {
+    localStorage.setItem("shotdb.lines", select.value);
+    tell({ op: "lines", n: Number(select.value) });
+  });
 }
 
 // A dropped worker stops at once: the manager puts its targets back in the queue.
@@ -130,6 +143,13 @@ let pinned = false; // the hover parameter's tooltip is shown
 
 function onManager(msg: FromManager) {
   switch (msg.op) {
+    case "samples": {
+      const select = $<HTMLSelectElement>("#lines");
+      select.replaceChildren(...msg.lines.map((n) => new Option(String(n))));
+      const stored = Number(localStorage.getItem("shotdb.lines"));
+      select.value = String(msg.lines.includes(stored) ? stored : msg.default);
+      return;
+    }
     case "opened":
       opens.get(msg.id)?.(msg);
       opens.delete(msg.id);
@@ -656,6 +676,8 @@ function newQueue(q: Extract<FromManager, { op: "queue" }>) {
   state.gen = q.gen;
   state.shooter = q.shooter;
   state.round = q.round ?? -1;
+  state.lines = q.lines;
+  $<HTMLSelectElement>("#lines").value = String(q.lines);
   state.rounds = q.rounds ? { range: q.range!, rounds: q.rounds } : null;
   state.queue = q.targets ?? [];
   state.started.clear();
@@ -715,8 +737,8 @@ function roundsPanel() {
   const guns = new Set(r.rounds.map((s) => s.gun));
   let gun = guns.size === 1 ? r.rounds[0].gun : "";
   const head = (gun ? `<b>${esc(gun)}</b>: ` : "") + (state.round >= 0
-    ? `only <b>${esc(r.rounds[state.round].name)}</b> at ${r.range} m · click it again for the best of all`
-    : `${r.rounds.length} rounds at ${r.range} m, the best per target · click a round to fire only it`);
+    ? `only <b>${esc(r.rounds[state.round].name)}</b> at ${r.range} m, ${state.lines} lines · click it again for the best of all`
+    : `${r.rounds.length} rounds at ${r.range} m, ${state.lines} lines a round, the best per target · click a round to fire only it`);
   const rows = r.rounds.map((s, i) => {
     const g = s.gun === gun ? "" : `<tr><th class="gun" colspan="8">${esc((gun = s.gun))}</th></tr>`;
     const mass = s.mass >= 1 ? `${s.mass.toFixed(2)} kg` : `${Math.round(s.mass * 1000)} g`;
@@ -812,7 +834,7 @@ function showTooltip(el: HTMLElement, pinned = false) {
   } else {
     const n = state.rounds?.rounds.length ?? 0;
     body = `<div class="tt-shell">${esc(res.shell.name)} <span class="muted">${shellType(res.shell.type)} · ${res.shell.pen} mm flat at ${state.rounds?.range ?? 500} m</span></div>`
-      + `<div class="tt-sub">${esc(res.shell.gun)} · ${state.round >= 0 ? "the only round fired" : `best of ${n} round${n === 1 ? "" : "s"}`}</div>`
+      + `<div class="tt-sub">${esc(res.shell.gun)} · ${state.round >= 0 ? "the only round fired" : `best of ${n} round${n === 1 ? "" : "s"}`} · ${state.lines} lines a round</div>`
       + res.views.map((v) => {
         const total = OUTCOMES.reduce((a, o) => a + (v.counts[o] ?? 0), 0);
         const bar = OUTCOMES.map((o) => v.counts[o] ? `<i class="o-${o}" style="flex:${v.counts[o]}"></i>` : "").join("");

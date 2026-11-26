@@ -100,6 +100,7 @@ export type ToManager =
   | { op: "open"; id: number; source: Source }
   | { op: "shooter"; id: string }
   | { op: "round"; index: number }
+  | { op: "lines"; n: number } // shot lines a round on each target, one of the counts of "samples"
   | { op: "pause" }
   | { op: "hold"; n: number }
   | { op: "worker"; id: number; port: MessagePort }
@@ -118,8 +119,9 @@ export interface Progress {
 
 // Manager -> page, as JSON strings. gen is the queue that the message is about.
 export type FromManager =
+  | { op: "samples"; lines: number[]; default: number } // the line counts that "lines" takes
   | { op: "opened"; id: number; info?: GameInfo; error?: string }
-  | { op: "queue"; gen: number; shooter: string; error?: string; round?: number; range?: number; rounds?: Shell[]; targets?: string[] }
+  | { op: "queue"; gen: number; shooter: string; lines: number; error?: string; round?: number; range?: number; rounds?: Shell[]; targets?: string[] }
   | { op: "start"; gen: number; target: string }
   | { op: "back"; gen: number; targets: string[] } // targets that went back in the queue
   | ({ op: "result"; gen: number; target: string } & ({ result: SimResult } | { error: string }))
@@ -131,7 +133,7 @@ export type FromManager =
 export type ToCompute =
   | { op: "gen"; gen: number }
   | { op: "tables"; buf: Uint8Array }
-  | { op: "shooter"; gen: number; round: number; buf: Uint8Array }
+  | { op: "shooter"; gen: number; round: number; sample: number; buf: Uint8Array } // sample: an index in sim.Samples
   | { op: "target"; gen: number; target: string; buf: Uint8Array; blob: Blob };
 
 // Compute worker -> manager: the JSON of a SimResult or a SimError, or no result when the target was skipped.

@@ -18,6 +18,7 @@
 //	{op: "open", id, source}   open the game files of a source; the answer "opened" has the same id
 //	{op: "shooter", id}        "" for none
 //	{op: "round", index}       fire only that round; the same index again fires all
+//	{op: "lines", n}           shot lines a round on each target, a count of sim.Samples; others keep the count
 //	{op: "pause"}              stop or continue the queue
 //	{op: "hold", n}            targets that a compute worker holds at once
 //	{op: "worker", id, port}   a compute worker joined; port is a MessagePort to it
@@ -26,7 +27,8 @@
 //	                           a compute worker failed in the shot at target of queue gen (both
 //	                           absent when it ran none): that target fails, the others go back
 //
-// Messages to the page are JSON strings, see web/src/types.ts.
+// Messages to the page are JSON strings, see web/src/types.ts. The first one,
+// "samples", gives the line counts that "lines" takes.
 package main
 
 import (
@@ -69,6 +71,7 @@ type manager struct {
 
 	shooter    string
 	round      int // -1: the best of all rounds
+	sample     int // index in sim.Samples
 	rounds     []sim.ShellInfo
 	shooterPkt []byte
 	gen        int // bumps on every queue restart; answers of older queues are dropped
@@ -101,7 +104,12 @@ func push(f func(*manager)) {
 }
 
 func main() {
-	m := &manager{round: -1, hold: 2}
+	m := &manager{round: -1, sample: sim.DefaultSample, hold: 2}
+	var counts []int
+	for _, s := range sim.Samples {
+		counts = append(counts, s.Lines())
+	}
+	post(map[string]any{"op": "samples", "lines": counts, "default": counts[sim.DefaultSample]})
 	started := make(chan struct{})
 	api := js.Global().Get("Object").New()
 	api.Set("start", js.FuncOf(func(_ js.Value, args []js.Value) any {
@@ -139,6 +147,18 @@ func main() {
 					m.round = i
 				}
 				m.restart()
+			})
+		case "lines":
+			n := msg.Get("n").Float()
+			push(func(m *manager) {
+				i := slices.IndexFunc(sim.Samples, func(s sim.Sample) bool { return float64(s.Lines()) == n })
+				if i < 0 || i == m.sample {
+					return
+				}
+				m.sample = i
+				if m.shooter != "" {
+					m.restart()
+				}
 			})
 		case "pause":
 			push(func(m *manager) {
@@ -276,14 +296,14 @@ func (m *manager) open(id int, src js.Value) {
 	m.restart()
 }
 
-// restart starts the queue of the shooter and the round, outwards from the
+// restart starts the queue of the shooter, the round and the sample, outwards from the
 // shooter's BR: by distance, the higher BR first on ties.
 func (m *manager) restart() {
 	m.stop()
-	m.paused = false // a new shooter or round starts its queue at once
+	m.paused = false // a new shooter, round or line count starts its queue at once
 	m.queue, m.rounds, m.wins, m.shooterPkt = nil, nil, nil, nil
 	m.total, m.done, m.ms = 0, 0, 0
-	msg := map[string]any{"op": "queue", "gen": m.gen, "shooter": m.shooter}
+	msg := map[string]any{"op": "queue", "gen": m.gen, "shooter": m.shooter, "lines": sim.Samples[m.sample].Lines()}
 	defer func() {
 		post(msg)
 		m.progress()
@@ -308,7 +328,7 @@ func (m *manager) restart() {
 	m.wins = make([]int, len(m.rounds))
 	m.shooterPkt = pkt
 	for _, w := range m.workers {
-		send(w, map[string]any{"op": "shooter", "gen": m.gen, "round": m.round}, pkt)
+		send(w, map[string]any{"op": "shooter", "gen": m.gen, "round": m.round, "sample": m.sample}, pkt)
 	}
 	br := func(id string) float64 { return m.data.Units[id].BR }
 	sbr := br(m.shooter)
@@ -445,7 +465,7 @@ func (m *manager) join(id int, port js.Value) {
 		send(w, map[string]any{"op": "tables"}, m.tables)
 	}
 	if m.shooterPkt != nil {
-		send(w, map[string]any{"op": "shooter", "gen": m.gen, "round": m.round}, m.shooterPkt)
+		send(w, map[string]any{"op": "shooter", "gen": m.gen, "round": m.round, "sample": m.sample}, m.shooterPkt)
 	}
 }
 
