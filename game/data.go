@@ -100,14 +100,17 @@ type Data struct {
 	mu       sync.Mutex
 	vehicles []*dm.Vehicle // the most recent last
 	ptypes   map[string]tree
-	packs    map[string]packRef // collision resource -> pack, once indexed
+	weapons  map[string]weapon             // by path
+	mults    map[string]map[string]float64 // damage multipliers of each armour class
+	packs    map[string]packRef            // collision resource -> pack: the ones found, and all once indexed
+	indexed  bool
 }
 
 var groundClasses = map[string]bool{"exp_tank": true, "exp_heavy_tank": true, "exp_tank_destroyer": true, "exp_SPAA": true}
 
 // Open finds the game data in a directory and loads the tables and the unit list.
 func Open(files Files) (*Data, error) {
-	d := &Data{files: files, ptypes: map[string]tree{}}
+	d := &Data{files: files, ptypes: map[string]tree{}, weapons: map[string]weapon{}, packs: map[string]packRef{}}
 	_, err := files.ReadAt("aces.vromfs.bin", 0, 16)
 	switch {
 	case err == nil:
@@ -372,10 +375,10 @@ func (d *Data) loadTables() error {
 	if err != nil {
 		return err
 	}
-	d.Classes = map[string]tree{}
+	d.Classes, d.mults = map[string]tree{}, map[string]map[string]float64{}
 	for name, v := range classes {
 		if c, ok := v.(tree); ok {
-			d.Classes[name] = c
+			d.Classes[name], d.mults[name] = c, damageMults(c)
 		}
 	}
 

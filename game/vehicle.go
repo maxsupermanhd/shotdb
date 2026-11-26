@@ -13,8 +13,13 @@ import (
 	"shotdb/grp"
 )
 
-// Mechanisms the simulation charges parts for.
-var mechs = []string{"generic", "cumulative", "explosion", "secondaryShatter", "shatter", "tandemPrecharge"}
+// Mechanisms the simulation charges parts for, each with its keys {mech}ArmorQuality and {mech}EffectiveThicknessMax.
+var mechs = func() (out [][3]string) {
+	for _, m := range []string{"generic", "cumulative", "explosion", "secondaryShatter", "shatter", "tandemPrecharge"} {
+		out = append(out, [3]string{m, m + "ArmorQuality", m + "EffectiveThicknessMax"})
+	}
+	return out
+}()
 
 // keptVehicles bounds the memory: a queue loads every unit once, and a loaded
 // unit takes about 0.2 MB.
@@ -41,7 +46,7 @@ func (d *Data) Vehicle(id string) (*dm.Vehicle, error) {
 	}
 	v := &dm.Vehicle{Unit: u, Model: str(t, "model"), Parts: map[string]*dm.Part{}, Racks: map[string]dm.Rack{}, MinCrew: 2}
 	if parts, ok := t["DamageParts"].(tree); ok {
-		d.parts(parts, "", nil, v.Parts)
+		d.parts(parts, "", nil, nil, v.Parts)
 	}
 	d.effects(t, v)
 	d.crewAndRacks(t, v)
@@ -103,16 +108,19 @@ var moduleGroups = map[string]bool{
 var moduleClasses = map[string]bool{"steel_tankman": true, "armor_tank_engine": true, "optics_tank": true, "tank_barrel": true}
 
 // parts walks DamageParts. Keys ending in _dm are parts; other blocks are
-// groups whose plain keys apply to the parts inside them.
-func (d *Data) parts(group tree, groupName string, outer []tree, out map[string]*dm.Part) {
+// groups whose plain keys apply to the parts inside them. outerMults holds
+// the damage multipliers of each block of outer, as a group block has a key
+// for each of its parts and is too slow to walk for each part.
+func (d *Data) parts(group tree, groupName string, outer []tree, outerMults []map[string]float64, out map[string]*dm.Part) {
 	chain := append([]tree{group}, outer...)
+	chainMults := append([]map[string]float64{damageMults(group)}, outerMults...)
 	for name, v := range group {
 		b, ok := v.(tree)
 		if !ok {
 			continue
 		}
 		if !strings.HasSuffix(name, "_dm") {
-			d.parts(b, name, chain, out)
+			d.parts(b, name, chain, chainMults, out)
 			continue
 		}
 		scopes := append([]tree{b}, chain...)
@@ -174,28 +182,37 @@ func (d *Data) parts(group tree, groupName string, outer []tree, out map[string]
 			p.Ricochet = flag("allowRicochet", true)
 		}
 		for _, m := range mechs {
-			if q, ok := lookup(m + "ArmorQuality"); ok {
+			if q, ok := lookup(m[1]); ok {
 				if f, ok := q.(float64); ok {
-					p.Mech[m] = f
+					p.Mech[m[0]] = f
 				}
 			}
-			if c := number(m+"EffectiveThicknessMax", 0); c > 0 {
-				p.MechMax[m] = c
+			if c := number(m[2], 0); c > 0 {
+				p.MechMax[m[0]] = c
 			}
 		}
-		for _, s := range append(scopes, cls) {
-			for k, v := range s {
-				if t, ok := strings.CutSuffix(k, "DamageMult"); ok {
-					if f, ok := v.(float64); ok {
-						if _, seen := p.DamageMult[t]; !seen {
-							p.DamageMult[t] = f
-						}
-					}
+		for _, m := range append(append([]map[string]float64{damageMults(b)}, chainMults...), d.mults[class]) {
+			for t, f := range m {
+				if _, seen := p.DamageMult[t]; !seen {
+					p.DamageMult[t] = f
 				}
 			}
 		}
 		out[p.Name] = p
 	}
+}
+
+// damageMults gives the {type}DamageMult values of a block by type.
+func damageMults(b tree) map[string]float64 {
+	m := map[string]float64{}
+	for k, v := range b {
+		if t, ok := strings.CutSuffix(k, "DamageMult"); ok {
+			if f, ok := v.(float64); ok {
+				m[t] = f
+			}
+		}
+	}
+	return m
 }
 
 // effects reads DamageEffects into the parts' rules, onHit sorted by damage, highest first.
@@ -297,20 +314,11 @@ func (d *Data) shells(t tree, v *dm.Vehicle) error {
 			if path == "" || strings.HasSuffix(path, "dummy_weapon.blk") {
 				continue
 			}
-			wt, err := d.blk("aces", path)
+			wp, err := d.weapon(path)
 			if err != nil {
 				return fmt.Errorf("%s: %w", v.ID, err)
 			}
-			base := strings.TrimSuffix(path[strings.LastIndex(path, "/")+1:], ".blk")
-			gun := d.names["weapons/"+base]
-			if gun == "" {
-				gun = base
-			}
-			for _, b := range bullets(wt) {
-				s, err := d.shell(b)
-				if err != nil {
-					return fmt.Errorf("%s: %w", v.ID, err)
-				}
+			for _, s := range wp.shells {
 				if first {
 					v.RackExplosive = s.ExplMass > 0
 					first = false
@@ -323,12 +331,43 @@ func (d *Data) shells(t tree, v *dm.Vehicle) error {
 					continue
 				}
 				seen[key] = true
-				s.Gun = gun
+				s.Gun = wp.gun
 				v.Shells = append(v.Shells, s)
 			}
 		}
 	}
 	return nil
+}
+
+type weapon struct {
+	gun    string
+	shells []dm.Shell // all rounds of the weapon file, in file order
+}
+
+// weapon gives the gun name and the rounds of a weapon file, once. Most
+// weapon files are used by many units.
+func (d *Data) weapon(path string) (weapon, error) {
+	if wp, ok := d.weapons[path]; ok {
+		return wp, nil
+	}
+	wt, err := d.blk("aces", path)
+	if err != nil {
+		return weapon{}, err
+	}
+	base := strings.TrimSuffix(path[strings.LastIndex(path, "/")+1:], ".blk")
+	wp := weapon{gun: d.names["weapons/"+base]}
+	if wp.gun == "" {
+		wp.gun = base
+	}
+	for _, b := range bullets(wt) {
+		s, err := d.shell(b)
+		if err != nil {
+			return weapon{}, err
+		}
+		wp.shells = append(wp.shells, s)
+	}
+	d.weapons[path] = wp
+	return wp, nil
 }
 
 // bullets lists the rounds of a weapon file: its default bullet blocks and

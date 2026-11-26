@@ -286,9 +286,10 @@ the manager does not read the collision resource. Package `packet` encodes the p
 encoding/gob, which keeps every float64 exact, also +Inf.
 
 The manager does the work that does not depend on the shooter once per open: the game data,
-the packet of the tables and the list of targets. It keeps the last 32 loaded units. It keeps
-no target packets for the next queue: all packets of a queue take 86 MB, and such a cache
-stays in wasm memory, which never shrinks.
+the packet of the tables and the list of targets. It keeps the last 32 loaded units, the
+rounds of each weapon file that it read, and the place of each collision resource that it
+found. It keeps no target packets for the next queue: all packets of a queue take 86 MB, and
+such a cache stays in wasm memory, which never shrinks.
 
 ## Speed
 
@@ -307,40 +308,49 @@ each perforation. A compute worker builds the mesh, the BVH and the lines of eac
 keeps them only while it fires at it. A queue fires at each target once.
 
 In the page with the manager and the compute workers, on the 2.61.0.42 install (headless
-Chromium, 16 CPU threads, the M4A2 queue of 1254 targets). "Before" is the design with one
-wasm per worker that each read the game files. The time of a pair now counts the decode of
-the packet in the compute worker, and no longer the load of the target.
+Chromium, a Ryzen 7 3700X with 8 cores and 16 threads, the queue of 1254 targets). The time
+of a pair counts the decode of the packet and the parse of the collision resource in the
+compute worker, and not the load of the target in the manager. "Idle" is the share of the
+time that a compute worker waits for a target.
 
-| compute workers | before: wall time, ms a pair | now: wall time, ms a pair |
-| --- | --- | --- |
-| 4 | 162 s, 504 ms | 163 s, 511 ms |
-| 8 | 86 s, 531 ms | 87 s, 540 ms |
-| 16 | 72 s, 886 ms | 73 s, 889 ms |
+| shooter | compute workers | wall time | ms a pair | idle | manager busy |
+| --- | --- | --- | --- | --- | --- |
+| M4A2 | 4 | 157 s | 498 ms | 0 % | 9 % |
+| M4A2 | 8 | 83 s | 523 ms | 0 % | 22 % |
+| M4A2 | 16 | 70 s | 872 ms | 0 % | 46 % |
+| BT-5 | 4 | 118 s | 372 ms | 0 % | 12 % |
+| BT-5 | 8 | 63 s | 398 ms | 0 % | 27 % |
+| BT-5 | 16 | 52 s | 653 ms | 0 % | 59 % |
 
-The manager prepares a target in 41 ms with 8 compute workers (17.7 ms to load the unit,
-10.8 ms to read and parse the collision resource, 12.5 ms to encode the packet), and in 56 ms
-with 16, as the threads are busier. With 8 workers it is busy 59 % of the time, and no worker
-waits for a target. With 16 workers it is busy 95 % of the time, workers wait 256 times in a
-queue, and the queue takes 2 % longer than before.
+The manager prepares a target in 11 ms with 4 compute workers and in 25 ms with 16, as the
+threads are busier: it loads the unit, finds the collision resource and encodes the packet.
+At 16 workers, each pair takes 1.7 times as long as at 8. The machine has 8 cores, so two
+workers share each core, and 16 workers give only 1.2 times the speed of 8.
+
+Before, the manager also read and parsed each collision resource and put the nodes in the
+packet. It then took 28 ms for a target with 4 workers and 45 ms with 16. With
+the BT-5 and 16 workers it was busy 99 % of the time, the compute workers waited 18 % of the
+time, and the queue took 57 s.
 
 ## Memory
 
 Wasm memory never shrinks, so the peak sets the size of each worker. On the 2.61.0.42 install,
 from open to the end of the M4A2 queue (headless Chromium):
 
-| compute workers | before | now |
+| compute workers | one wasm per worker | manager and compute workers |
 | --- | --- | --- |
-| 4 | 801 MB | 313 MB |
-| 8 | 1604 MB | 430 MB |
-| 16 | 3205 MB | 636 MB |
+| 4 | 801 MB | 323 MB |
+| 8 | 1604 MB | 443 MB |
+| 16 | 3205 MB | 670 MB |
 
-Before, each worker took about 200 MB. Now the manager takes about 200 MB and each compute
-worker 25 to 33 MB. The peak of the manager comes from `open`: the containers unpack one at a
-time, and the parse of `char.vromfs.bin/config/wpcost.blk` makes a tree of about 90 MB for a
+With one wasm per worker, each worker took about 200 MB. Now the manager takes about 200 MB
+and each compute worker 28 to 32 MB. The peak of the manager comes from `open`: the
+containers unpack one at a time, and the parse of `char.vromfs.bin/config/wpcost.blk` makes a tree of about 90 MB for a
 short time. After `open` the manager keeps about 25 MB of game data: the name maps, the `lang`
 names and the files of `aces.vromfs.bin` that the simulation reads. A compute worker keeps the
-tables, the shooter, and the packet, the mesh and the BVH of the target that it fires at.
-`compute.wasm` is 5.1 MB, `manager.wasm` 6.9 MB.
+tables, the shooter, and the packet, the collision resource, the mesh and the BVH of the
+target that it fires at.
+`compute.wasm` is 6.0 MB, `manager.wasm` 6.8 MB.
 
 ## Checks
 

@@ -59,7 +59,7 @@ func (d *Data) indexPacks() error {
 	if err != nil {
 		return err
 	}
-	d.packs = map[string]packRef{}
+	d.indexed = true
 	for _, f := range files {
 		if !strings.HasSuffix(f, ".grp") {
 			continue
@@ -87,12 +87,14 @@ func (d *Data) Collision(v *dm.Vehicle) (path string, off int64, n int, err erro
 		p, err := d.packTable(v.ID + ".grp")
 		switch {
 		case err == nil:
-			ref, ok = refIn(p, v.ID+".grp", key)
+			if ref, ok = refIn(p, v.ID+".grp", key); ok {
+				d.packs[key] = ref
+			}
 		case !errors.Is(err, fs.ErrNotExist):
 			return "", 0, 0, err
 		}
 	}
-	if !ok && d.packs == nil {
+	if !ok && !d.indexed {
 		if err := d.indexPacks(); err != nil {
 			return "", 0, 0, err
 		}
