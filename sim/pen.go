@@ -3,13 +3,13 @@ package sim
 import (
 	"math"
 
-	"shotdb/game"
+	"shotdb/dm"
 )
 
 const airDensity = 1.225
 
 // impactSpeed applies the game's drag law over a distance.
-func impactSpeed(sh *game.Shell, dist float64) float64 {
+func impactSpeed(sh *dm.Shell, dist float64) float64 {
 	if sh.Rocket || sh.Mass <= 0 || sh.Cx <= 0 {
 		return sh.Speed
 	}
@@ -19,7 +19,7 @@ func impactSpeed(sh *game.Shell, dist float64) float64 {
 
 // kineticPen is the flat penetration of the shell body at an impact speed.
 // Rounds with neither formula read their armorpower table at the range.
-func kineticPen(d *game.Data, sh *game.Shell, speed, rangeM float64) float64 {
+func kineticPen(d *dm.Tables, sh *dm.Shell, speed, rangeM float64) float64 {
 	switch {
 	case sh.LanzOd != nil:
 		a, b := lanzOdermatt(sh)
@@ -28,12 +28,12 @@ func kineticPen(d *game.Data, sh *game.Shell, speed, rangeM float64) float64 {
 	case sh.DeMarre != nil:
 		return deMarreC(d, sh) * math.Pow(speed/d.ArmorResistance, sh.DeMarre.SpeedPow)
 	case len(sh.ArmorPower) > 0:
-		return game.Interp(sh.ArmorPower, rangeM)
+		return dm.Interp(sh.ArmorPower, rangeM)
 	}
 	return 0
 }
 
-func lanzOdermatt(sh *game.Shell) (a, b float64) {
+func lanzOdermatt(sh *dm.Shell) (a, b float64) {
 	lo := sh.LanzOd
 	dmm := sh.DmgCal * 1000
 	mul := 1.104
@@ -49,18 +49,18 @@ func lanzOdermatt(sh *game.Shell) (a, b float64) {
 }
 
 // deMarreC is the De Marre coefficient, with the filler modifier of APHE.
-func deMarreC(d *game.Data, sh *game.Shell) float64 {
-	dm := sh.DeMarre
-	c := 100 * dm.K * math.Pow(sh.DmgMass, dm.MassPow) * math.Pow(sh.DmgCal*1000*0.01, -dm.CaliberPow)
+func deMarreC(d *dm.Tables, sh *dm.Shell) float64 {
+	k := sh.DeMarre
+	c := 100 * k.K * math.Pow(sh.DmgMass, k.MassPow) * math.Pow(sh.DmgCal*1000*0.01, -k.CaliberPow)
 	if sh.Mass > 0 && sh.ExplMass > 0 && len(d.FillerPenMod) > 0 {
-		c *= game.Interp(d.FillerPenMod, sh.ExplMass/sh.Mass)
+		c *= dm.Interp(d.FillerPenMod, sh.ExplMass/sh.Mass)
 	}
 	return c
 }
 
 // speedFor inverts the penetration curve: the speed at which the body has pen.
 // Rounds without a speed curve scale the impact speed by the penetration share.
-func speedFor(d *game.Data, sh *game.Shell, pen, flat, speed float64) float64 {
+func speedFor(d *dm.Tables, sh *dm.Shell, pen, flat, speed float64) float64 {
 	if pen <= 0 {
 		return 0
 	}
@@ -82,7 +82,7 @@ func speedFor(d *game.Data, sh *game.Shell, pen, flat, speed float64) float64 {
 
 // slope is the S factor of the shell's slope preset, with the game's breach
 // rule and scale cap. Without a preset it is 1/cos. base is quality x thickness.
-func slope(d *game.Data, sh *game.Shell, p *game.Part, base, cos float64) float64 {
+func slope(d *dm.Tables, sh *dm.Shell, p *dm.Part, base, cos float64) float64 {
 	cal := sh.DmgCal * 1000
 	t, ok := d.Slope[sh.SlopePreset]
 	if !ok || base <= 0 || d.ArmorBreachK*base <= cal || cal <= p.SlopeMin {

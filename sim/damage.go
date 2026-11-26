@@ -5,7 +5,7 @@ import (
 	"slices"
 	"strings"
 
-	"shotdb/game"
+	"shotdb/dm"
 )
 
 // fate is what the damage of one shot does to the vehicle.
@@ -68,7 +68,7 @@ func (s *shot) resolve() fate {
 		gate := math.Min(1, (1-left/p.HP)/math.Max(s.d.EffectThreshold, 1e-9))
 		// Warhead fragments take the explosion rules of a part that has none for shatter.
 		kind := m.kind
-		if kind == "shatter" && !slices.ContainsFunc(p.OnHit, func(r game.Rule) bool { return slices.Contains(r.Types, "shatter") }) {
+		if kind == "shatter" && !slices.ContainsFunc(p.OnHit, func(r dm.Rule) bool { return slices.Contains(r.Types, "shatter") }) {
 			kind = "explosion"
 		}
 		for _, r := range p.OnHit {

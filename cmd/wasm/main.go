@@ -19,11 +19,12 @@ import (
 	"io/fs"
 	"syscall/js"
 
+	"shotdb/dm"
 	"shotdb/game"
 	"shotdb/sim"
 )
 
-var simulator sim.Simulator
+var data *game.Data
 
 func main() {
 	api := js.Global().Get("Object").New()
@@ -33,12 +34,12 @@ func main() {
 		}
 		files := jsFiles{read: args[0], readRange: args[1], list: args[2]}
 		return promise(func() (any, error) {
-			data, err := game.Open(files)
+			d, err := game.Open(files)
 			if err != nil {
 				return "", err
 			}
-			simulator = &sim.Sim{Data: data}
-			units := make([]game.Unit, 0, len(data.Units))
+			data = d
+			units := make([]dm.Unit, 0, len(data.Units))
 			for _, u := range data.Units {
 				units = append(units, u)
 			}
@@ -52,14 +53,14 @@ func main() {
 		}
 		shooter := args[0].String()
 		return promise(func() (any, error) {
-			if simulator == nil {
+			if data == nil {
 				return "", errors.New("no game data open")
 			}
-			rounds, err := simulator.Rounds(shooter)
+			a, err := data.Vehicle(shooter)
 			if err != nil {
 				return "", err
 			}
-			out, err := json.Marshal(map[string]any{"range": sim.Range, "rounds": rounds})
+			out, err := json.Marshal(map[string]any{"range": sim.Range, "rounds": sim.Rounds(&data.Tables, a)})
 			return string(out), err
 		})
 	}))
@@ -69,10 +70,22 @@ func main() {
 		}
 		shooter, target, round := args[0].String(), args[1].String(), args[2].Int()
 		return promise(func() (any, error) {
-			if simulator == nil {
+			if data == nil {
 				return "", errors.New("no game data open")
 			}
-			r, err := simulator.Simulate(shooter, target, round)
+			a, err := data.Vehicle(shooter)
+			if err != nil {
+				return "", err
+			}
+			v, err := data.Vehicle(target)
+			if err != nil {
+				return "", err
+			}
+			nodes, err := data.Nodes(v)
+			if err != nil {
+				return "", err
+			}
+			r, err := sim.Simulate(&data.Tables, a, v, nodes, round)
 			if err != nil {
 				return "", err
 			}

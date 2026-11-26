@@ -24,6 +24,8 @@ import (
 	"github.com/klauspost/compress/zstd"
 	"github.com/maxsupermanhd/wrpl-inspector/v3/wrpl"
 	"github.com/maxsupermanhd/wrpl-inspector/v3/wtcontent"
+
+	"shotdb/dm"
 )
 
 // Files gives read access to the chosen directory. Paths are slash separated
@@ -80,53 +82,25 @@ func (d Dir) List(dir string) ([]string, error) {
 	return names, nil
 }
 
-// Unit is one ground vehicle of the research trees.
-type Unit struct {
-	ID      string  `json:"id"`
-	Name    string  `json:"name"`
-	Country string  `json:"country"`
-	Role    string  `json:"role"`
-	Rank    int     `json:"rank"`
-	BR      float64 `json:"br"`
-}
-
-// Table is a slope effect or ricochet preset: curves blended by caliberToArmor.
-// Each curve is stored with x = sin(angle from the surface), so it is read at cos(angle from the normal).
-type Table []Row
-
-type Row struct {
-	Ratio float64
-	Curve []Point
-}
-
 // Data is the loaded game data. Vehicle details load on first use.
 type Data struct {
 	Source  string
 	Version string
-	Units   map[string]Unit
+	Units   map[string]dm.Unit
 	Trees   []Tree
 
-	Slope    map[string]Table // values are 1/S
-	Ricochet map[string]Table // values are probabilities
-	Classes  map[string]tree
-
-	MaxArmorScale   float64
-	ArmorBreachK    float64
-	ArmorResistance float64
-	FillerPenMod    []Point // filler mass / shell mass -> penetration multiplier
+	dm.Tables
+	Classes map[string]tree
 
 	names  map[string]string
 	files  Files
 	vromfs map[string]map[string][]byte
 	slims  map[string]slim
 
-	Globals
-
 	mu       sync.Mutex
-	vehicles []*Vehicle // the most recent last
+	vehicles []*dm.Vehicle // the most recent last
 	ptypes   map[string]tree
 	packs    map[string]packRef // collision resource -> pack, once indexed
-
 }
 
 var groundClasses = map[string]bool{"exp_tank": true, "exp_heavy_tank": true, "exp_tank_destroyer": true, "exp_SPAA": true}
@@ -362,14 +336,14 @@ func floats(v any) any {
 }
 
 func (d *Data) loadTables() error {
-	dm, err := d.blk("aces", "config/damagemodel.blk")
+	dmb, err := d.blk("aces", "config/damagemodel.blk")
 	if err != nil {
 		return err
 	}
-	d.MaxArmorScale = numOr(dm, "maxArmorEffectiveScale", 20)
-	d.ArmorBreachK = numOr(dm, "armorBreachK", 7)
-	d.ArmorResistance = numOr(dm, "armorResistance", 1900)
-	if m, ok := dm["penetrationByExplosiveMassModifier"].(tree); ok {
+	d.MaxArmorScale = numOr(dmb, "maxArmorEffectiveScale", 20)
+	d.ArmorBreachK = numOr(dmb, "armorBreachK", 7)
+	d.ArmorResistance = numOr(dmb, "armorResistance", 1900)
+	if m, ok := dmb["penetrationByExplosiveMassModifier"].(tree); ok {
 		d.FillerPenMod = points(m, "mod")
 	}
 
@@ -377,7 +351,7 @@ func (d *Data) loadTables() error {
 	if err != nil {
 		return err
 	}
-	d.Slope = map[string]Table{}
+	d.Slope = map[string]dm.Table{}
 	for name, v := range slope {
 		if preset, ok := v.(tree); ok {
 			d.Slope[name] = table(preset, "slopeEffect", true)
@@ -387,7 +361,7 @@ func (d *Data) loadTables() error {
 	if err != nil {
 		return err
 	}
-	d.Ricochet = map[string]Table{}
+	d.Ricochet = map[string]dm.Table{}
 	for name, v := range ric {
 		if preset, ok := v.(tree); ok {
 			d.Ricochet[name] = table(preset, "ricochetProbability", false)
@@ -409,14 +383,14 @@ func (d *Data) loadTables() error {
 	if err != nil {
 		return err
 	}
-	return d.loadGlobals(dm, expl)
+	return d.loadGlobals(dmb, expl)
 }
 
 // table reads a preset. Its rows are the child blocks with caliberToArmor;
 // a preset without rows is one row itself.
-func table(preset tree, prefix string, inverse bool) Table {
-	row := func(b tree) Row {
-		var c []Point
+func table(preset tree, prefix string, inverse bool) dm.Table {
+	row := func(b tree) dm.Row {
+		var c []dm.Point
 		for _, p := range points(b, prefix) {
 			if inverse && p.Y < 1 {
 				continue
@@ -425,11 +399,11 @@ func table(preset tree, prefix string, inverse bool) Table {
 			if inverse {
 				y = 1 / y
 			}
-			c = append(c, Point{math.Sin(p.X * math.Pi / 180), y})
+			c = append(c, dm.Point{X: math.Sin(p.X * math.Pi / 180), Y: y})
 		}
-		return Row{Ratio: numOr(b, "caliberToArmor", 1), Curve: c}
+		return dm.Row{Ratio: numOr(b, "caliberToArmor", 1), Curve: c}
 	}
-	var t Table
+	var t dm.Table
 	for _, v := range preset {
 		if b, ok := v.(tree); ok {
 			if _, ok := num(b, "caliberToArmor"); ok {
@@ -438,28 +412,10 @@ func table(preset tree, prefix string, inverse bool) Table {
 		}
 	}
 	if len(t) == 0 {
-		t = Table{row(preset)}
+		t = dm.Table{row(preset)}
 	}
 	sort.Slice(t, func(i, j int) bool { return t[i].Ratio < t[j].Ratio })
 	return t
-}
-
-// At reads the table at cos(angle from the normal), blending rows linearly on ratio.
-func (t Table) At(cos, ratio float64) float64 {
-	if len(t) == 0 {
-		return 0
-	}
-	if ratio <= t[0].Ratio {
-		return Interp(t[0].Curve, cos)
-	}
-	for i := 1; i < len(t); i++ {
-		if ratio <= t[i].Ratio {
-			a, b := t[i-1], t[i]
-			f := (ratio - a.Ratio) / (b.Ratio - a.Ratio)
-			return Interp(a.Curve, cos)*(1-f) + Interp(b.Curve, cos)*f
-		}
-	}
-	return Interp(t[len(t)-1].Curve, cos)
 }
 
 func (d *Data) loadNames() error {
@@ -512,7 +468,7 @@ func (d *Data) loadUnits(wp tree) error {
 			lower[strings.ToLower(id)] = t
 		}
 	}
-	d.Units = map[string]Unit{}
+	d.Units = map[string]dm.Unit{}
 	for id, v := range wp {
 		u, ok := v.(tree)
 		if !ok || !groundClasses[str(u, "unitClass")] {
@@ -536,7 +492,7 @@ func (d *Data) loadUnits(wp tree) error {
 			}
 		}
 		// Keyed in lower case: wpcost.blk and shop.blk mix case, the datamine paths do not.
-		d.Units[strings.ToLower(id)] = Unit{
+		d.Units[strings.ToLower(id)] = dm.Unit{
 			ID:      strings.ToLower(id),
 			Name:    name,
 			Country: strings.TrimPrefix(str(u, "country"), "country_"),

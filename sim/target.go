@@ -4,7 +4,7 @@ import (
 	"math"
 	"slices"
 
-	"shotdb/game"
+	"shotdb/dm"
 	"shotdb/geom"
 )
 
@@ -26,13 +26,13 @@ type sample struct {
 
 // target is what the simulation keeps of a vehicle: its mesh, parts and shot lines.
 type target struct {
-	v      *game.Vehicle
+	v      *dm.Vehicle
 	mesh   *geom.Mesh
-	parts  []*game.Part // by mesh part index
-	solid  []bool       // the node's SOLID flag: charged by the chord
-	center []vec        // part centres
-	views  [][]sample   // one list per view, in Views order
-	crew   []int32      // crew parts by mesh index, with counts
+	parts  []*dm.Part // by mesh part index
+	solid  []bool     // the node's SOLID flag: charged by the chord
+	center []vec      // part centres
+	views  [][]sample // one list per view, in Views order
+	crew   []int32    // crew parts by mesh index, with counts
 	count  []int
 	byName map[string]int32
 }
@@ -44,7 +44,7 @@ func (t *target) index(name string) int32 {
 	return -1
 }
 
-func newTarget(v *game.Vehicle, nodes []geom.Node) *target {
+func newTarget(v *dm.Vehicle, nodes []geom.Node) *target {
 	t := &target{v: v, byName: map[string]int32{}}
 	var tris []geom.Tri
 	for i, n := range nodes {

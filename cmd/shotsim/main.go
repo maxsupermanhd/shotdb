@@ -32,11 +32,22 @@ func run(dir, shooter string, targets []string) error {
 	if err != nil {
 		return err
 	}
-	s := &sim.Sim{Data: data}
+	a, err := data.Vehicle(shooter)
+	if err != nil {
+		return err
+	}
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	for _, t := range targets {
-		r, err := s.Simulate(shooter, t, -1)
+		v, err := data.Vehicle(t)
+		if err != nil {
+			return err
+		}
+		nodes, err := data.Nodes(v)
+		if err != nil {
+			return err
+		}
+		r, err := sim.Simulate(&data.Tables, a, v, nodes, -1)
 		if err != nil {
 			return err
 		}

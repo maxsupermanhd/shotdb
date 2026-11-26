@@ -1,3 +1,5 @@
+// Package geom holds the collision nodes of a vehicle and traces rays through
+// them with a bounding volume hierarchy.
 package geom
 
 import (

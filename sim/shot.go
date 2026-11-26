@@ -4,7 +4,7 @@ import (
 	"math"
 	"math/rand/v2"
 
-	"shotdb/game"
+	"shotdb/dm"
 	"shotdb/geom"
 )
 
@@ -21,7 +21,7 @@ const (
 
 // shell is a round with its values at the range.
 type shell struct {
-	*game.Shell
+	*dm.Shell
 	speed float64 // at the target
 	pen   float64 // flat penetration of the body (or the jet)
 	body  float64 // flat penetration of the kinetic body
@@ -37,7 +37,7 @@ type message struct {
 
 // shot is one simulated shot.
 type shot struct {
-	d    *game.Data
+	d    *dm.Tables
 	t    *target
 	sh   *shell
 	rng  *rand.Rand
@@ -114,7 +114,7 @@ func (s *shot) charge(i int32, sp span) (charge, cost float64) {
 	return charge, math.Max(charge, p.Through)
 }
 
-func (s *shot) ricochetChance(p *game.Part, sp span) float64 {
+func (s *shot) ricochetChance(p *dm.Part, sp span) float64 {
 	if p.Module || !p.Ricochet {
 		return 0
 	}
@@ -196,7 +196,7 @@ func (s *shot) kinetic(o, d vec, spans []span, pen, speed float64, bounces int) 
 		gap := sp.in - prevExit
 		prevExit = math.Max(prevExit, s.exit(sp))
 		if s.broke && len(sh.BreakAir) > 0 {
-			pen *= game.Interp(sh.BreakAir, gap)
+			pen *= dm.Interp(sh.BreakAir, gap)
 		}
 		charge, cost := s.charge(i, sp)
 		if !p.Module && s.first < 0 && charge > 0 {
@@ -205,7 +205,7 @@ func (s *shot) kinetic(o, d vec, spans []span, pen, speed float64, bounces int) 
 		if gap > ricochetGap && s.chance(s.ricochetChance(p, sp)) {
 			s.ricochet = true
 			if bounces < maxBounces {
-				s.bounce(o, d, sp, pen*game.Interp(s.d.RicochetPenKept, sp.cos), speed*s.d.RicochetSpeedMul, bounces)
+				s.bounce(o, d, sp, pen*dm.Interp(s.d.RicochetPenKept, sp.cos), speed*s.d.RicochetSpeedMul, bounces)
 			}
 			return
 		}
@@ -214,7 +214,7 @@ func (s *shot) kinetic(o, d vec, spans []span, pen, speed float64, bounces int) 
 		}
 		if p.Module {
 			v := speedFor(s.d, sh.Shell, pen, sh.body, sh.speed)
-			amount := game.Interp(s.d.EnergyToDamage, 0.5*sh.Mass*v*v)
+			amount := dm.Interp(s.d.EnergyToDamage, 0.5*sh.Mass*v*v)
 			if pen < charge {
 				amount *= p.Restrain
 			}
@@ -241,7 +241,7 @@ func (s *shot) kinetic(o, d vec, spans []span, pen, speed float64, bounces int) 
 			if thick > sh.BreakMin && thick < sh.BreakMax {
 				s.broke = true
 				if len(sh.BreakScale) > 0 {
-					residual *= game.Interp(sh.BreakScale, thick)
+					residual *= dm.Interp(sh.BreakScale, thick)
 				}
 			}
 		}
@@ -512,7 +512,7 @@ func (s *shot) explode(at, d vec) {
 	}
 	before := len(s.msgs)
 	tntB := sh.ExplMass * strength(s.d.Brisance, sh.ExplType)
-	var class *game.ShatterClass
+	var class *dm.ShatterClass
 	for k := range s.d.Shatters {
 		class = &s.d.Shatters[k]
 		if class.Fill >= tntB/sh.Mass {
@@ -520,26 +520,26 @@ func (s *shot) explode(at, d vec) {
 		}
 	}
 	if class != nil {
-		r, p, dm := game.Interp(class.Radius, tntB), game.Interp(class.Pen, tntB), game.Interp(class.Dmg, tntB)
-		n := game.Interp(class.Cnt, sh.Mass-tntB)
+		r, p, dmg := dm.Interp(class.Radius, tntB), dm.Interp(class.Pen, tntB), dm.Interp(class.Dmg, tntB)
+		n := dm.Interp(class.Cnt, sh.Mass-tntB)
 		if sh.Shatter != nil {
 			for _, g := range sh.Shatter.Segments {
 				cnt := math.Round(n * sh.Shatter.CountPortion * g.Portion)
 				s.throw(cnt, d, at, g.Inner, g.Outer, fragment{
 					rng: r * g.RadiusScale, pen0: p * g.PenScale, pen1: p * g.PenScale,
-					dmg0: dm * g.DmgScale, dmg1: dm * g.DmgScale, kind: "shatter", fire: 1, from: -1,
+					dmg0: dmg * g.DmgScale, dmg1: dmg * g.DmgScale, kind: "shatter", fire: 1, from: -1,
 				})
 			}
 		} else {
 			// The statistical shatters of APHE: fragments in every direction from the burst.
-			s.throw(math.Round(n), d, at, 0, 180, fragment{rng: r, pen0: p, pen1: p, dmg0: dm, dmg1: dm, kind: "shatter", fire: 1, from: -1})
+			s.throw(math.Round(n), d, at, 0, 180, fragment{rng: r, pen0: p, pen1: p, dmg0: dmg, dmg1: dmg, kind: "shatter", fire: 1, from: -1})
 		}
 	}
 
 	tnt := sh.ExplMass * strength(s.d.Strength, sh.ExplType)
 	sp := s.d.Splash
-	inner, outer := game.Interp(sp.Inner, tnt), game.Interp(sp.Outer, tnt)
-	pen, dmg := game.Interp(sp.Pen, tnt), game.Interp(sp.Damage, tnt)
+	inner, outer := dm.Interp(sp.Inner, tnt), dm.Interp(sp.Outer, tnt)
+	pen, dmg := dm.Interp(sp.Pen, tnt), dm.Interp(sp.Damage, tnt)
 	for i, p := range s.t.parts {
 		if !p.Module {
 			continue
@@ -558,7 +558,7 @@ func (s *shot) explode(at, d vec) {
 	}
 	for _, c := range []struct {
 		parts []string
-		blast game.Blast
+		blast dm.Blast
 		open  bool
 	}{{s.t.v.Pressure, s.d.Closed, false}, {s.t.v.Open, s.d.Opened, true}} {
 		var idx []int32
@@ -572,8 +572,8 @@ func (s *shot) explode(at, d vec) {
 		if !hit {
 			continue
 		}
-		in, out := game.Interp(c.blast.Inner, tnt), game.Interp(c.blast.Outer, tnt)
-		pd, pp := game.Interp(c.blast.Damage, tnt), game.Interp(c.blast.Pen, tnt)
+		in, out := dm.Interp(c.blast.Inner, tnt), dm.Interp(c.blast.Outer, tnt)
+		pd, pp := dm.Interp(c.blast.Damage, tnt), dm.Interp(c.blast.Pen, tnt)
 		for _, i := range idx {
 			p := s.t.parts[i]
 			if pp < s.d.SplashThreshold*p.Q("pressure")*p.Thickness {

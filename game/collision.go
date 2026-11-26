@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"shotdb/geom"
+	"shotdb/grp"
 )
 
 // TanksDir holds the resource packs of ground vehicles, in the install.
@@ -17,13 +18,13 @@ type packRef struct {
 	off, end int64
 }
 
-func (d *Data) packTable(file string) (*geom.Pack, error) {
+func (d *Data) packTable(file string) (*grp.Pack, error) {
 	path := TanksDir + "/" + file
 	head, err := d.files.ReadAt(path, 0, 16<<10)
 	if err != nil {
 		return nil, err
 	}
-	n, err := geom.HeadSize(head)
+	n, err := grp.HeadSize(head)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
@@ -32,14 +33,14 @@ func (d *Data) packTable(file string) (*geom.Pack, error) {
 			return nil, err
 		}
 	}
-	p, err := geom.ReadPack(head)
+	p, err := grp.ReadPack(head)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	return p, nil
 }
 
-func refIn(p *geom.Pack, file, key string) (packRef, bool) {
+func refIn(p *grp.Pack, file, key string) (packRef, bool) {
 	for _, e := range p.Entries {
 		if strings.EqualFold(e.Name, key) {
 			off, end, _ := p.Span(e.Name)
@@ -107,7 +108,7 @@ func (d *Data) collision(unit, model string) ([]geom.Node, error) {
 	if err != nil {
 		return nil, err
 	}
-	nodes, err := geom.ParseCollision(raw)
+	nodes, err := grp.ParseCollision(raw)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %s: %w", unit, key, err)
 	}

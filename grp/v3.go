@@ -1,4 +1,4 @@
-package geom
+package grp
 
 import (
 	"bytes"
@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"math"
+
+	"shotdb/geom"
 )
 
 // The 0xACE50003 payload: a 108 byte header (11 section counts at 64), node
@@ -20,7 +22,7 @@ const (
 	blasInner  = 16
 )
 
-func parseV3(p []byte) ([]Node, error) {
+func parseV3(p []byte) ([]geom.Node, error) {
 	if len(p) < v3Header {
 		return nil, errors.New("collision: payload too short")
 	}
@@ -39,7 +41,7 @@ func parseV3(p []byte) ([]Node, error) {
 	if pos > len(p) {
 		return nil, errors.New("collision: node tables past the end")
 	}
-	nodes := make([]Node, n)
+	nodes := make([]geom.Node, n)
 	for i := range nodes {
 		rec := records + 48*i
 		indices := int(le.Uint32(p[rec+4:]))

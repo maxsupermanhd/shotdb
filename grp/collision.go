@@ -1,4 +1,4 @@
-package geom
+package grp
 
 import (
 	"encoding/binary"
@@ -7,6 +7,8 @@ import (
 	"math"
 
 	"github.com/klauspost/compress/zstd"
+
+	"shotdb/geom"
 )
 
 // Collision resource class ids.
@@ -16,24 +18,8 @@ const (
 	ClassCollisionV3   = 0xACE50003 // zstd packed column tables, one quantised BVH per node mesh
 )
 
-// CollisionNode behaviour flags.
-const (
-	FlagTraceable = 0x1
-	FlagPhys      = 0x2
-	FlagSolid     = 0x4
-)
-
-// Node is one collision node: for a vehicle, one damage part. Vertices are in
-// the unit's native frame (+x forward, +y up, +z right), in metres.
-type Node struct {
-	Name  string
-	Flags uint32 // behaviour flags; FlagSolid marks a part charged by its chord
-	Verts [][3]float32
-	Tris  [][3]uint32
-}
-
 // ParseCollision decodes a collision resource.
-func ParseCollision(raw []byte) ([]Node, error) {
+func ParseCollision(raw []byte) ([]geom.Node, error) {
 	if len(raw) < 12 {
 		return nil, errors.New("collision: too short")
 	}
@@ -120,7 +106,7 @@ const (
 	rawVersionFlags   = 538445072
 )
 
-func parseRaw(raw []byte) ([]Node, error) {
+func parseRaw(raw []byte) ([]geom.Node, error) {
 	c := &cursor{b: raw, pos: 4}
 	version := c.u32()
 	c.take(4 + 20) // the size of the bounding sphere, then the sphere
@@ -140,9 +126,9 @@ func parseRaw(raw []byte) ([]Node, error) {
 	if count <= 0 || count > 10000 {
 		return nil, fmt.Errorf("collision: %d nodes", count)
 	}
-	nodes := make([]Node, 0, count)
+	nodes := make([]geom.Node, 0, count)
 	for range count {
-		n := Node{Name: c.str()}
+		n := geom.Node{Name: c.str()}
 		if version >= rawVersionPhysMat {
 			c.str()
 		}
@@ -190,7 +176,7 @@ func parseRaw(raw []byte) ([]Node, error) {
 	return nodes, checkIndices(nodes)
 }
 
-func parseZstd(p []byte) ([]Node, error) {
+func parseZstd(p []byte) ([]geom.Node, error) {
 	if len(p) < 84 {
 		return nil, errors.New("collision: payload too short")
 	}
@@ -200,9 +186,9 @@ func parseZstd(p []byte) ([]Node, error) {
 	if count <= 0 || count > 10000 {
 		return nil, fmt.Errorf("collision: %d nodes", count)
 	}
-	nodes := make([]Node, 0, count)
+	nodes := make([]geom.Node, 0, count)
 	for range count {
-		n := Node{Name: c.str()}
+		n := geom.Node{Name: c.str()}
 		c.str() // physical material
 		head := c.take(104)
 		if head == nil {
@@ -247,7 +233,7 @@ func parseZstd(p []byte) ([]Node, error) {
 	return nodes, checkIndices(nodes)
 }
 
-func checkIndices(nodes []Node) error {
+func checkIndices(nodes []geom.Node) error {
 	for _, n := range nodes {
 		for _, t := range n.Tris {
 			for _, i := range t {

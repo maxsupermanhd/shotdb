@@ -8,19 +8,11 @@ import (
 	"math"
 	"math/rand/v2"
 	"sort"
-	"sync"
 	"time"
 
-	"shotdb/game"
+	"shotdb/dm"
 	"shotdb/geom"
 )
-
-// Simulator gives the result of a shooter against a target. With round -1 it
-// fires every round of the shooter and keeps the best, else only that round.
-type Simulator interface {
-	Simulate(shooter, target string, round int) (Result, error)
-	Rounds(shooter string) ([]ShellInfo, error)
-}
 
 const Range = 500.0 // m
 
@@ -85,53 +77,16 @@ type PlateInfo struct {
 	Shots int     `json:"shots"`
 }
 
-// Sim is the Simulator over loaded game data. The last targets prepared are kept.
-type Sim struct {
-	Data *game.Data
-
-	mu      sync.Mutex
-	targets []*target // the most recent last
-}
-
-// keptTargets bounds the memory: a target's mesh takes a few MB. A queue fires
-// at each target once, so a kept target helps only when a new queue starts
-// with the last targets of the queue before.
-const keptTargets = 4
-
-func (s *Sim) target(v *game.Vehicle) (*target, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for i, t := range s.targets {
-		if t.v.ID == v.ID {
-			s.targets = append(append(s.targets[:i:i], s.targets[i+1:]...), t)
-			return t, nil
-		}
-	}
-	nodes, err := s.Data.Nodes(v)
-	if err != nil {
-		return nil, err
-	}
-	t := newTarget(v, nodes)
-	if len(s.targets) >= keptTargets {
-		s.targets = s.targets[1:]
-	}
-	s.targets = append(s.targets, t)
-	return t, nil
-}
-
-func (s *Sim) Rounds(shooter string) ([]ShellInfo, error) {
-	a, err := s.Data.Vehicle(shooter)
-	if err != nil {
-		return nil, err
-	}
+// Rounds lists the shooter's rounds at the range.
+func Rounds(d *dm.Tables, a *dm.Vehicle) []ShellInfo {
 	out := make([]ShellInfo, len(a.Shells))
 	for k := range a.Shells {
-		out[k] = newShell(s.Data, &a.Shells[k]).info(k)
+		out[k] = newShell(d, &a.Shells[k]).info(k)
 	}
-	return out, nil
+	return out
 }
 
-func newShell(d *game.Data, g *game.Shell) *shell {
+func newShell(d *dm.Tables, g *dm.Shell) *shell {
 	sh := &shell{Shell: g, speed: impactSpeed(g, Range)}
 	sh.body = kineticPen(d, g, sh.speed, Range)
 	sh.pen = sh.body
@@ -150,31 +105,23 @@ func (sh *shell) info(index int) ShellInfo {
 	}
 }
 
-func (s *Sim) Simulate(shooter, target string, round int) (Result, error) {
+// Simulate fires the shooter a at the target v, on the target's collision
+// nodes. With round -1 it fires every round of the shooter and keeps the best,
+// else only that round.
+func Simulate(d *dm.Tables, a, v *dm.Vehicle, nodes []geom.Node, round int) (Result, error) {
 	start := time.Now()
-	a, err := s.Data.Vehicle(shooter)
-	if err != nil {
-		return Result{}, err
+	if round >= len(a.Shells) {
+		return Result{}, fmt.Errorf("%s has no round %d", a.ID, round)
 	}
-	v, err := s.Data.Vehicle(target)
-	if err != nil {
-		return Result{}, err
-	}
-	t, err := s.target(v)
-	if err != nil {
-		return Result{}, err
-	}
+	t := newTarget(v, nodes)
 	best := Result{}
 	bestPen := -1.0
 	shots := 0
-	if round >= len(a.Shells) {
-		return Result{}, fmt.Errorf("%s has no round %d", shooter, round)
-	}
 	for k := range a.Shells {
 		if round >= 0 && k != round {
 			continue
 		}
-		r := s.shoot(k, &a.Shells[k], t)
+		r := shoot(d, k, &a.Shells[k], t)
 		shots += r.Shots
 		if best.Shell == nil || r.Score > best.Score || (r.Score == best.Score && r.Shell.PenMm > bestPen) {
 			best, bestPen = r, r.Shell.PenMm
@@ -191,8 +138,7 @@ func (s *Sim) Simulate(shooter, target string, round int) (Result, error) {
 }
 
 // shoot fires one shell along every shot line of every view.
-func (s *Sim) shoot(index int, g *game.Shell, t *target) Result {
-	d := s.Data
+func shoot(d *dm.Tables, index int, g *dm.Shell, t *target) Result {
 	sh := newShell(d, g)
 	// FNV-1a of the round and the target.
 	seed := uint64(14695981039346656037)

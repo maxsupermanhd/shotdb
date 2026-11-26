@@ -3,6 +3,8 @@ package game
 import (
 	"slices"
 	"strings"
+
+	"shotdb/dm"
 )
 
 // A tree is one decoded BLK file: the .blkx JSON shape, which the binary decoder also gives.
@@ -42,13 +44,10 @@ func blocks(m tree, key string) []tree {
 	return nil
 }
 
-// Point is one (x, y) node of a curve.
-type Point struct{ X, Y float64 }
-
 // points collects the 2D vector params of a block whose names start with prefix,
 // sorted by x. A repeated name gives a list of vectors; every one counts.
-func points(m tree, prefix string) []Point {
-	var out []Point
+func points(m tree, prefix string) []dm.Point {
+	var out []dm.Point
 	for k, v := range m {
 		if !strings.HasPrefix(k, prefix) {
 			continue
@@ -69,7 +68,7 @@ func points(m tree, prefix string) []Point {
 			}
 		}
 	}
-	slices.SortFunc(out, func(a, b Point) int {
+	slices.SortFunc(out, func(a, b dm.Point) int {
 		switch {
 		case a.X < b.X:
 			return -1
@@ -81,33 +80,13 @@ func points(m tree, prefix string) []Point {
 	return out
 }
 
-func vec2(l []any) (Point, bool) {
+func vec2(l []any) (dm.Point, bool) {
 	if len(l) != 2 {
-		return Point{}, false
+		return dm.Point{}, false
 	}
 	x, ok1 := l[0].(float64)
 	y, ok2 := l[1].(float64)
-	return Point{x, y}, ok1 && ok2
-}
-
-// Interp reads a curve linearly in x and clamps at its ends.
-func Interp(c []Point, x float64) float64 {
-	if len(c) == 0 {
-		return 0
-	}
-	if x <= c[0].X {
-		return c[0].Y
-	}
-	for i := 1; i < len(c); i++ {
-		if x <= c[i].X {
-			a, b := c[i-1], c[i]
-			if b.X == a.X {
-				return b.Y
-			}
-			return a.Y + (b.Y-a.Y)*(x-a.X)/(b.X-a.X)
-		}
-	}
-	return c[len(c)-1].Y
+	return dm.Point{X: x, Y: y}, ok1 && ok2
 }
 
 // strs gives a string param, or a list of them.

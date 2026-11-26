@@ -1,6 +1,6 @@
-// Package geom reads the collision models of ground vehicles from the game's
-// resource packs and traces rays through them.
-package geom
+// Package grp reads the game's GRP2 resource packs and the collision
+// resources in them.
+package grp
 
 import (
 	"bytes"
