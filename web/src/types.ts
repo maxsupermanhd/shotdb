@@ -97,7 +97,7 @@ export type Source =
 
 // Page -> manager. See cmd/manager.
 export type ToManager =
-  | { op: "open"; source: Source }
+  | { op: "open"; id: number; source: Source }
   | { op: "shooter"; id: string }
   | { op: "round"; index: number }
   | { op: "pause" }
@@ -118,7 +118,7 @@ export interface Progress {
 
 // Manager -> page, as JSON strings. gen is the queue that the message is about.
 export type FromManager =
-  | { op: "opened"; info?: GameInfo; error?: string }
+  | { op: "opened"; id: number; info?: GameInfo; error?: string }
   | { op: "queue"; gen: number; shooter: string; error?: string; round?: number; range?: number; rounds?: Shell[]; targets?: string[] }
   | { op: "start"; gen: number; target: string }
   | { op: "back"; gen: number; targets: string[] } // targets that went back in the queue

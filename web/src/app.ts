@@ -113,15 +113,19 @@ function setWorkers(n: number) {
   }
 }
 
-let opened: ((r: { info?: GameInfo; error?: string }) => void) | null = null;
+type Opened = { info?: GameInfo; error?: string };
+let openSeq = 0; // the id of the newest open
+const opens = new Map<number, (r: Opened) => void>(); // open id -> its resolve
+// The data of an older open that the manager holds while a newer open loads. The page shows it when the newer open fails.
+let held: GameInfo | null = null;
 let pinned = false; // the hover parameter's tooltip is shown
 let managerDown = false;
 
 function onManager(msg: FromManager) {
   switch (msg.op) {
     case "opened":
-      opened?.(msg);
-      opened = null;
+      opens.get(msg.id)?.(msg);
+      opens.delete(msg.id);
       return;
     case "error":
       return setStatus(msg.error, true);
@@ -164,8 +168,8 @@ function managerFailed(error: string) {
   if (managerDown) return;
   managerDown = true;
   manager.terminate();
-  opened?.({ error: `The manager failed: ${error}` });
-  opened = null;
+  for (const resolve of opens.values()) resolve({ error: `The manager failed: ${error}` });
+  opens.clear();
   setStatus(`The manager failed: ${error}`, true);
   state.stopped = error;
   for (const id of state.started) {
@@ -240,6 +244,10 @@ function render() {
       main.append(block);
     }
   }
+  // The queue can be older than the trees: the held data of an older open shows after the queue of that open started.
+  cards.get(state.shooter)?.forEach((el) => el.classList.add("shooter"));
+  for (const id of state.started) cards.get(id)?.forEach((el) => el.classList.add("running"));
+  for (const id of state.results.keys()) paint(id);
   applyNations();
 }
 
@@ -516,24 +524,33 @@ function handleStore(op: "get" | "put" | "delete", handle?: FileSystemDirectoryH
 
 async function openSource(src: Source, label: string) {
   const open = $<HTMLButtonElement>("#open");
+  const id = ++openSeq;
   open.disabled = true;
   setStatus(`Loading ${label}…`);
-  opened?.({ error: "another folder was picked" });
-  const { info, error } = await new Promise<{ info?: GameInfo; error?: string }>((resolve) => {
-    opened = resolve;
-    tell({ op: "open", source: src });
+  const { info, error } = await new Promise<Opened>((resolve) => {
+    opens.set(id, resolve);
+    tell({ op: "open", id, source: src });
   });
+  // The manager runs the opens in order. Only the newest open shows its data, or the held data when it fails.
+  if (id !== openSeq) {
+    if (info) held = info;
+    return false;
+  }
   open.disabled = false;
+  const data = info ?? held;
+  held = null;
+  if (data) {
+    state.game = new Map(data.units.map((u) => [u.id, { ...u, name: clean(u.name) }]));
+    trees = data.trees;
+    render();
+    fillPicker();
+  }
   if (!info) {
     setStatus(error!, true);
     return false;
   }
-  state.game = new Map(info.units.map((u) => [u.id, { ...u, name: clean(u.name) }]));
-  trees = info.trees;
-  render();
   const inTree = [...cards.keys()].filter((id) => state.game.has(id)).length;
   setStatus(`${label} · ${info.source}${info.version ? ` ${info.version}` : ""} · ${inTree} vehicles`);
-  fillPicker();
   return true; // the manager keeps the shooter that the user picked before, if the new data has it
 }
 
@@ -686,7 +703,7 @@ function progress() {
 function paint(id: string) {
   const res = state.results.get(id);
   if (!res) return;
-  for (const el of cards.get(id)!) {
+  for (const el of cards.get(id) ?? []) {
     el.classList.remove("running");
     el.classList.add("done");
     if ("error" in res || !res.shell) {

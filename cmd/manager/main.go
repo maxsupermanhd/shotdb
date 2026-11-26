@@ -14,7 +14,7 @@
 //
 // Messages of the page:
 //
-//	{op: "open", source}       open the game files of a source
+//	{op: "open", id, source}   open the game files of a source; the answer "opened" has the same id
 //	{op: "shooter", id}        "" for none
 //	{op: "round", index}       fire only that round; the same index again fires all
 //	{op: "pause"}              stop or continue the queue
@@ -118,8 +118,8 @@ func main() {
 		msg := args[0]
 		switch op := msg.Get("op").String(); op {
 		case "open":
-			src := msg.Get("source")
-			push(func(m *manager) { m.open(src) })
+			id, src := msg.Get("id").Int(), msg.Get("source")
+			push(func(m *manager) { m.open(id, src) })
 		case "shooter":
 			id := msg.Get("id").String()
 			push(func(m *manager) {
@@ -220,7 +220,7 @@ func (m *manager) stop() {
 
 // open loads the game files of src. The old data goes first, as wasm memory never
 // shrinks. When the new data fails, the old source loads again and its queue continues.
-func (m *manager) open(src js.Value) {
+func (m *manager) open(id int, src js.Value) {
 	m.data = nil
 	m.useSource.Invoke(src)
 	d, err := guard(func() (*game.Data, error) { return game.Open(m.files) })
@@ -229,7 +229,7 @@ func (m *manager) open(src js.Value) {
 		tables, err = packet.Tables(&d.Tables)
 	}
 	if err != nil {
-		post(map[string]any{"op": "opened", "error": err.Error()})
+		post(map[string]any{"op": "opened", "id": id, "error": err.Error()})
 		m.useSource.Invoke(m.source)
 		if m.source.IsUndefined() {
 			return
@@ -267,7 +267,7 @@ func (m *manager) open(src js.Value) {
 	for _, u := range d.Units {
 		units = append(units, u)
 	}
-	post(map[string]any{"op": "opened", "info": map[string]any{"source": d.Source, "version": d.Version, "units": units, "trees": d.Trees}})
+	post(map[string]any{"op": "opened", "id": id, "info": map[string]any{"source": d.Source, "version": d.Version, "units": units, "trees": d.Trees}})
 	// a shooter that the user picked before stays, if the new data has it
 	if _, ok := d.Units[m.shooter]; !ok {
 		m.shooter = ""
