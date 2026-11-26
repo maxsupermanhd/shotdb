@@ -239,10 +239,11 @@ body {
 .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
 .sw.pending { background: var(--pending); outline: 1px solid var(--line); }
 
-/* compact: each card is a square tile of --tile px (set by fitCompact) with the centre of its picture */
+/* compact: each card is a tile --tile px wide (set by fitCompact) with the centre of its picture
+   in the top --pic px and the three view bars in the 4 px under it */
 .compact-ctl { display: flex; align-items: center; gap: 6px; }
 .compact-note { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
-.compact .trees-grid { --tile: 20px; column-gap: 6px; padding: 0 4px; }
+.compact .trees-grid { --tile: 20px; --pic: 30px; column-gap: 6px; padding: 0 4px; }
 .compact .nation-head {
   contain: inline-size; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
   display: block; padding: 2px 1px 1px; font-size: 11px; line-height: 13px; border-bottom-width: 1px;
@@ -256,10 +257,12 @@ body {
 .compact .rank-body { gap: 3px; }
 .compact .grid { border-spacing: 2px; margin: -2px; }
 .compact .grid.premium { padding-left: 3px; }
-.compact .grid td { width: var(--tile); height: var(--tile); }
+.compact .grid td { width: var(--tile); height: calc(var(--pic) + 4px); }
 .compact .stack { gap: 1px; }
-.compact .card { width: var(--tile); height: var(--tile); padding: 0; border: 0; border-radius: 2px; }
-.compact .card-name, .compact .card-br, .compact .card-views { display: none; }
+.compact .card { width: var(--tile); height: calc(var(--pic) + 4px); padding: 0; border: 0; border-radius: 2px; }
+.compact .card-name, .compact .card-br { display: none; }
+/* the strip covers the picture under the picture area */
+.compact .card-views { z-index: 1; height: 4px; padding-top: 1px; background: var(--page); }
 /* the frame lies over the picture */
 .compact .card::after, .compact .card.shooter::after {
   content: ""; position: absolute; inset: 0; z-index: 1; padding: 0;
@@ -274,7 +277,7 @@ body {
    centred: the tile shows the centre of the picture, at least half of its width. It takes the
    hue of the result colour under it. */
 .compact .card-icon {
-  left: 50%; top: 50%; bottom: auto; transform: translate(-50%, -50%);
+  left: 50%; top: calc(var(--pic) / 2); bottom: auto; transform: translate(-50%, -50%);
   width: auto; height: auto; max-width: calc(2 * var(--tile)); object-fit: contain;
   filter: none; mix-blend-mode: luminosity;
 }

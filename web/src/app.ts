@@ -254,6 +254,7 @@ function fitCompact() {
   const note = $("#compact-note");
   if (!document.body.classList.contains("compact") || !main.querySelector(".nation-head:not([hidden])")) {
     main.style.removeProperty("--tile");
+    main.style.removeProperty("--pic");
     note.textContent = "";
     return;
   }
@@ -265,8 +266,13 @@ function fitCompact() {
   const dw = (w2 - w1) / 10;
   // one pixel spare for rounding; the vertical scrollbar takes its width from the view
   const tile = Math.min(TILE_MAX, Math.floor((main.parentElement!.clientWidth - 1 - (w1 - 10 * dw)) / dw));
-  width(Math.max(TILE_MIN, tile));
-  note.textContent = tile >= TILE_MIN ? `${tile} px` : `does not fit at ${TILE_MIN} px: scroll`;
+  const w = Math.max(TILE_MIN, tile);
+  width(w);
+  // The picture area is 1.5 times as high as the tile is wide: the pictures are about square
+  // and drawn up to twice the tile width, so most of their height shows.
+  const pic = Math.min(TILE_MAX, Math.round(1.5 * w));
+  main.style.setProperty("--pic", `${pic}px`);
+  note.textContent = tile >= TILE_MIN ? `${w} × ${pic + 4} px` : `does not fit at ${TILE_MIN} px: scroll`;
   note.title = tile >= TILE_MIN ? "" : `The shown trees need tiles below ${TILE_MIN} px to fit the window width. Show fewer nations or use a wider window.`;
 }
 
