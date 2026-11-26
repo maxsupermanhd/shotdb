@@ -90,8 +90,13 @@ run the shots. One more worker, the manager, reads the game files and runs the q
 choice in `localStorage`. A change takes effect at once. A removed worker stops at once, and
 the manager puts its targets back at the front of the queue.
 
-When a compute worker fails, its targets show the error, and the other workers go on. When
-the manager fails, the page shows the error and the queue stops.
+When a compute worker fails in a shot, that target shows the error. The other targets of the
+worker go back in the queue, and a new worker starts. After 3 failed workers in a row with no
+good result between, no new worker starts. When no worker is left, the progress bar shows that
+the queue stopped. A change of **Workers** starts new ones.
+
+When the manager fails, the page shows the error and the queue stops. The next open starts a
+new manager. When an open fails, the manager keeps the data that it had, and its queue goes on.
 
 **Compact** in the bar under the header shows each vehicle as a small square tile: the centre
 of its picture in the result colour, and the front, side and rear bars in the bottom 4 px. The
