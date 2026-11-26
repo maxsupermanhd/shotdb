@@ -270,9 +270,11 @@ body {
 .compact .card.shooter { outline-offset: 0; z-index: 2; }
 .compact .card.shooter::after { box-shadow: inset 0 0 0 1px #111; }
 .compact .card.running { box-shadow: none; }
-/* The picture keeps its normal size, so the tile shows the square at its centre. It takes the
+/* The picture is drawn at its natural size (about 66 px high), at most twice the tile width,
+   centred: the tile shows the centre of the picture, at least half of its width. It takes the
    hue of the result colour under it. */
 .compact .card-icon {
   left: 50%; top: 50%; bottom: auto; transform: translate(-50%, -50%);
+  width: auto; height: auto; max-width: calc(2 * var(--tile)); object-fit: contain;
   filter: none; mix-blend-mode: luminosity;
 }

@@ -4,7 +4,7 @@ import type { Card, Grid, Outcome, Plate, Replies, Reply, Request, Rounds, Sourc
 const RANKS = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"];
 const OUTCOMES: Outcome[] = ["kill", "pen", "shatter", "ricochet", "nonpen"];
 const OUTCOME_LABEL: Record<Outcome, string> = { kill: "Pen + kill", pen: "Pen, no kill", shatter: "Pen, core broke", ricochet: "Ricochet", nonpen: "No pen" };
-const TILE_MIN = 8, TILE_MAX = 66; // TILE_MAX is the width of the card picture
+const TILE_MIN = 8, TILE_MAX = 66; // TILE_MAX is the height of the unit pictures
 
 const params = new URLSearchParams(location.search);
 const nationsParam = params.get("nations");
