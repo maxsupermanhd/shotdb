@@ -127,12 +127,12 @@ export type FromManager =
   | { op: "error"; error: string }
   | { op: "fatal"; error: string };
 
-// Manager -> compute worker, over its port. buf is a packet of package packet.
+// Manager -> compute worker, over its port. buf is a packet of package packet, blob the target's collision resource.
 export type ToCompute =
   | { op: "gen"; gen: number }
   | { op: "tables"; buf: Uint8Array }
   | { op: "shooter"; gen: number; round: number; buf: Uint8Array }
-  | { op: "target"; gen: number; target: string; buf: Uint8Array };
+  | { op: "target"; gen: number; target: string; buf: Uint8Array; blob: Blob };
 
 // Compute worker -> manager: the JSON of a SimResult or a SimError, or no result when the target was skipped.
 export interface FromCompute {

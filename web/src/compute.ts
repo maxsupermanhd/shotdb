@@ -1,5 +1,6 @@
 // Runs the shot simulation (compute.wasm) on the packets that the manager sends over a
-// MessagePort. It reads no files. It posts a ComputeFatal to the page when it fails.
+// MessagePort. It reads only the collision resource of each target, from the Blob that comes
+// with the target. It posts a ComputeFatal to the page when it fails.
 import type { ComputeFatal, FromCompute, ToCompute } from "./types";
 
 declare const self: DedicatedWorkerGlobalScope;
@@ -22,7 +23,8 @@ ready.catch((err) => fatal(message(err)));
 
 let port: MessagePort;
 let gen = 0; // the newest queue that the manager told of
-const inbox: ToCompute[] = [];
+// raw: the bytes of a target's collision resource, or the error of the read. The read starts on arrival.
+const inbox: { p: ToCompute; raw?: Promise<Uint8Array | string> }[] = [];
 let busy = false;
 
 self.onmessage = ({ data }: MessageEvent<{ port: MessagePort }>) => {
@@ -30,7 +32,8 @@ self.onmessage = ({ data }: MessageEvent<{ port: MessagePort }>) => {
   port.onmessage = ({ data: p }: MessageEvent<ToCompute>) => {
     // The queue number counts on arrival, so that the targets of an older queue that wait in the inbox are skipped.
     if (p.op === "gen" || p.op === "shooter") gen = Math.max(gen, p.gen);
-    if (p.op !== "gen") inbox.push(p);
+    if (p.op === "target") inbox.push({ p, raw: p.blob.arrayBuffer().then((b) => new Uint8Array(b), message) });
+    else if (p.op !== "gen") inbox.push({ p });
     void pump();
   };
 };
@@ -43,7 +46,7 @@ async function pump() {
   try {
     await ready;
     while (inbox.length && !failed) {
-      const p = inbox.shift()!;
+      const { p, raw } = inbox.shift()!;
       if (p.op === "tables") {
         const err = compute.tables(p.buf);
         if (err) fatal(`tables: ${err}`);
@@ -54,8 +57,17 @@ async function pump() {
       } else if (p.gen !== gen) {
         reply({ gen: p.gen, target: p.target });
       } else {
+        const collision = await raw!;
+        if (p.gen !== gen) {
+          reply({ gen: p.gen, target: p.target });
+          continue;
+        }
+        if (typeof collision === "string") {
+          reply({ gen: p.gen, target: p.target, result: JSON.stringify({ target: p.target, error: `cannot read the collision model: ${collision}` }) });
+          continue;
+        }
         shot = { gen: p.gen, target: p.target };
-        const result = compute.simulate(p.buf);
+        const result = compute.simulate(p.buf, collision);
         // undefined when the Go program exits in the call, for example out of memory or on a stack overflow
         if (typeof result !== "string") throw new Error(`the Go program stopped in the shot at ${p.target}`);
         shot = undefined;

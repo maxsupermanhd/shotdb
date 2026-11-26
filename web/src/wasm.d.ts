@@ -9,9 +9,11 @@ declare class Go {
 type ReadFile = (path: string) => Promise<Uint8Array | null>;
 type ReadRange = (path: string, offset: number, length: number) => Promise<Uint8Array | null>;
 type ListDir = (path: string) => Promise<string[] | null>;
+// A Blob of the range, which reads nothing until asked
+type BlobOf = (path: string, offset: number, length: number) => Promise<Blob | null>;
 
 declare var manager: {
-  start(readFile: ReadFile, readRange: ReadRange, listDir: ListDir, useSource: (source: import("./types").Source) => void): void;
+  start(readFile: ReadFile, readRange: ReadRange, listDir: ListDir, useSource: (source: import("./types").Source) => void, blob: BlobOf): void;
   message(msg: import("./types").ToManager): void;
 };
 
@@ -20,5 +22,5 @@ declare var compute: {
   tables(packet: Uint8Array): string | undefined;
   shooter(packet: Uint8Array, round: number): string | undefined; // round -1: the best of all
   // JSON of a SimResult or a SimError
-  simulate(packet: Uint8Array): string | undefined;
+  simulate(packet: Uint8Array, collision: Uint8Array): string | undefined;
 };

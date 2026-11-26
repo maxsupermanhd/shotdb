@@ -136,8 +136,9 @@ prints the result JSON that the page shows.
 - `packet/` encodes what the manager sends to the compute workers (see [Workers](#workers)).
 - `cmd/manager` is the manager's wasm. Its doc comment lists the messages of the page.
 - `cmd/compute` is the compute workers' wasm: `compute.tables(packet)`,
-  `compute.shooter(packet, round)` and `compute.simulate(packet)`. `round` -1 fires every
-  round and keeps the best. It imports no `game`, `grp`, zstd, BLK or vromfs code.
+  `compute.shooter(packet, round)` and `compute.simulate(packet, collision)`. `round` -1 fires
+  every round and keeps the best. It imports no `game`, BLK or vromfs code. It uses `grp` and
+  zstd to parse the collision resource of each target.
 - `web/` holds the page sources: `index.html`, `style.css` and `src/`. `src/manager.ts` runs
   the manager's wasm and reads the chosen folder. `src/compute.ts` runs the compute wasm.
   `src/app.ts` is the page, the pool of compute workers and the remembered folder. It draws
@@ -270,21 +271,24 @@ The page runs two wasm binaries, each in its own kind of Web Worker.
   runs the queue: the order outwards from the shooter's BR, the forced round, the pause, the
   changes of shooter and round, and a queue number that drops the answers of an old queue. It
   gives the targets to the compute workers and collects the results.
-- **The compute workers** (`compute.wasm`) read no files. Each one gets the global tables
-  once per open (28 KB), the shooter once per queue, and then one packet per target: the
-  target's damage parts, crew and racks, and its collision nodes (0.24 MB on average, 0.61 MB
-  at most). The manager keeps two targets in each worker: one runs and the next waits, so that
-  a worker does not wait for the manager.
+- **The compute workers** (`compute.wasm`) read one part of one file per target, and no other
+  file. Each one gets the global tables once per open (28 KB), the shooter once per queue, and
+  then one packet per target: the target's damage parts, crew and racks (68 KB on average,
+  153 KB at most). With the packet comes a Blob of the target's collision resource in its
+  tank pack. The compute worker starts to read the Blob when the target arrives, and it parses
+  the collision nodes itself. The manager keeps two targets in each worker: one runs and the
+  next waits, so that a worker does not wait for the manager.
 
 The manager sends each packet as a transferable ArrayBuffer over a MessageChannel straight
 to the compute worker. The page only makes the channels. A packet takes one copy out of Go,
-no copy on the way and one copy into Go. Package `packet` encodes the packets with
+no copy on the way and one copy into Go. A Blob is only a reference to a part of the file, so
+the manager does not read the collision resource. Package `packet` encodes the packets with
 encoding/gob, which keeps every float64 exact, also +Inf.
 
 The manager does the work that does not depend on the shooter once per open: the game data,
 the packet of the tables and the list of targets. It keeps the last 32 loaded units. It keeps
-no target packets for the next queue: such a cache stays in wasm memory, which never shrinks,
-and up to 8 workers the manager is not the bottleneck (see below).
+no target packets for the next queue: all packets of a queue take 86 MB, and such a cache
+stays in wasm memory, which never shrinks.
 
 ## Speed
 

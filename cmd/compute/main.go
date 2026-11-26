@@ -2,11 +2,12 @@
 
 // Command compute runs the shot simulation in a compute worker, as
 // globalThis.compute. It reads no game files: the manager sends it the
-// packets of package packet.
+// packets of package packet, and the page gives it the bytes of each
+// target's collision resource.
 //
-//	compute.tables(bytes)          -> error message, "" if none
-//	compute.shooter(bytes, round)  -> error message, "" if none; round -1 for the best
-//	compute.simulate(bytes)        -> JSON of a sim.Result, or {target, error}
+//	compute.tables(bytes)               -> error message, "" if none
+//	compute.shooter(bytes, round)       -> error message, "" if none; round -1 for the best
+//	compute.simulate(bytes, collision)  -> JSON of a sim.Result, or {target, error}
 //
 // Each call is synchronous. A panic comes back as an error.
 package main
@@ -58,7 +59,7 @@ func main() {
 		var target string
 		err := guard(func() error {
 			start := time.Now()
-			v, nodes, err := packet.ReadTarget(bytesOf(args[0]))
+			v, nodes, err := packet.ReadTarget(bytesOf(args[0]), bytesOf(args[1]))
 			if err != nil {
 				return err
 			}

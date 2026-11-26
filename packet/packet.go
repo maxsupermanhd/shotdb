@@ -1,6 +1,7 @@
 // Package packet encodes what the manager sends to the compute workers: the
 // global tables once, the shooter once per queue, and one packet per target.
-// The encoding is encoding/gob, which keeps every float64 exact (also +Inf
+// The collision resource of a target does not go in its packet: the compute
+// worker reads the resource from the pack and gives it to ReadTarget. The encoding is encoding/gob, which keeps every float64 exact (also +Inf
 // and NaN). Gob drops empty maps and slices, so they come back as nil: the
 // simulation only reads them. Each map value of Vehicle.Parts is its own
 // *Part. The parts of one DamageEffects block share their rule lists, which
@@ -10,9 +11,12 @@ package packet
 import (
 	"bytes"
 	"encoding/gob"
+	"fmt"
+	"strings"
 
 	"shotdb/dm"
 	"shotdb/geom"
+	"shotdb/grp"
 )
 
 func encode(values ...any) ([]byte, error) {
@@ -59,17 +63,16 @@ type target struct {
 	Vehicle       *dm.Vehicle
 	Rules         [][]dm.Rule
 	OnHit, OnKill map[string]int
-	Nodes         []geom.Node
 }
 
-// Target keeps what the simulation reads of a target, and its collision nodes.
-func Target(v *dm.Vehicle, nodes []geom.Node) ([]byte, error) {
+// Target keeps what the simulation reads of a target, and what picks its collision nodes.
+func Target(v *dm.Vehicle) ([]byte, error) {
 	t := target{
 		Vehicle: &dm.Vehicle{
-			Unit: v.Unit, Parts: map[string]*dm.Part{}, Crew: v.Crew, MinCrew: v.MinCrew,
-			Racks: v.Racks, RackExplosive: v.RackExplosive, Pressure: v.Pressure, Open: v.Open,
+			Unit: v.Unit, Model: v.Model, Parts: map[string]*dm.Part{}, Crew: v.Crew, MinCrew: v.MinCrew,
+			Racks: v.Racks, RackExplosive: v.RackExplosive, Pressure: v.Pressure, Open: v.Open, Hidden: v.Hidden,
 		},
-		OnHit: map[string]int{}, OnKill: map[string]int{}, Nodes: nodes,
+		OnHit: map[string]int{}, OnKill: map[string]int{},
 	}
 	type list struct {
 		first *dm.Rule
@@ -96,12 +99,14 @@ func Target(v *dm.Vehicle, nodes []geom.Node) ([]byte, error) {
 	return encode(&t)
 }
 
-func ReadTarget(b []byte) (*dm.Vehicle, []geom.Node, error) {
+// ReadTarget decodes a target packet and the target's collision resource.
+func ReadTarget(b, collision []byte) (*dm.Vehicle, []geom.Node, error) {
 	var t target
 	if err := decode(b, &t); err != nil {
 		return nil, nil, err
 	}
-	for name, p := range t.Vehicle.Parts {
+	v := t.Vehicle
+	for name, p := range v.Parts {
 		if i := t.OnHit[name]; i > 0 {
 			p.OnHit = t.Rules[i-1]
 		}
@@ -109,5 +114,12 @@ func ReadTarget(b []byte) (*dm.Vehicle, []geom.Node, error) {
 			p.OnKill = t.Rules[i-1]
 		}
 	}
-	return t.Vehicle, t.Nodes, nil
+	nodes, err := grp.ParseCollision(collision)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%s: %s_collision: %w", v.ID, strings.ToLower(v.Model), err)
+	}
+	if nodes, err = v.DamageNodes(nodes); err != nil {
+		return nil, nil, err
+	}
+	return v, nodes, nil
 }

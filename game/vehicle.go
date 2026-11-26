@@ -10,6 +10,7 @@ import (
 
 	"shotdb/dm"
 	"shotdb/geom"
+	"shotdb/grp"
 )
 
 // Mechanisms the simulation charges parts for.
@@ -78,23 +79,19 @@ func (d *Data) Vehicle(id string) (*dm.Vehicle, error) {
 // Nodes loads the vehicle's collision nodes that are damage parts, named
 // without the _dm suffix. They are read each time and not kept: they are large.
 func (d *Data) Nodes(v *dm.Vehicle) ([]geom.Node, error) {
-	nodes, err := d.collision(v.ID, v.Model)
+	path, off, n, err := d.Collision(v)
 	if err != nil {
 		return nil, err
 	}
-	var out []geom.Node
-	for _, n := range nodes {
-		name, ok := strings.CutSuffix(n.Name, "_dm")
-		if !ok || v.Hidden[name] || v.Parts[name] == nil || len(n.Tris) == 0 {
-			continue
-		}
-		n.Name = name
-		out = append(out, n)
+	raw, err := d.files.ReadAt(path, off, n)
+	if err != nil {
+		return nil, err
 	}
-	if len(out) == 0 {
-		return nil, fmt.Errorf("%s: no collision node names a damage part", v.ID)
+	nodes, err := grp.ParseCollision(raw)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %s_collision: %w", v.ID, strings.ToLower(v.Model), err)
 	}
-	return out, nil
+	return v.DamageNodes(nodes)
 }
 
 var moduleGroups = map[string]bool{

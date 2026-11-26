@@ -3,7 +3,13 @@
 // so the compute build does not link the game file readers.
 package dm
 
-import "math"
+import (
+	"fmt"
+	"math"
+	"strings"
+
+	"shotdb/geom"
+)
 
 // Unit is one ground vehicle of the research trees.
 type Unit struct {
@@ -33,6 +39,24 @@ type Vehicle struct {
 	Pressure, Open []string
 
 	Hidden map[string]bool // collision nodes not on the stock vehicle
+}
+
+// DamageNodes keeps the collision nodes that are damage parts of the stock
+// vehicle, named without the _dm suffix.
+func (v *Vehicle) DamageNodes(nodes []geom.Node) ([]geom.Node, error) {
+	var out []geom.Node
+	for _, n := range nodes {
+		name, ok := strings.CutSuffix(n.Name, "_dm")
+		if !ok || v.Hidden[name] || v.Parts[name] == nil || len(n.Tris) == 0 {
+			continue
+		}
+		n.Name = name
+		out = append(out, n)
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("%s: no collision node names a damage part", v.ID)
+	}
+	return out, nil
 }
 
 type Crew struct {

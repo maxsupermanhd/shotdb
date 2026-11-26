@@ -6,7 +6,7 @@ import (
 	"io/fs"
 	"strings"
 
-	"shotdb/geom"
+	"shotdb/dm"
 	"shotdb/grp"
 )
 
@@ -77,40 +77,33 @@ func (d *Data) indexPacks() error {
 	return nil
 }
 
-// collision loads the collision nodes of a unit's model. Most units sit in a
-// pack named after them; the others are found through an index of all packs.
-func (d *Data) collision(unit, model string) ([]geom.Node, error) {
-	key := strings.ToLower(model) + "_collision"
+// Collision finds the collision resource of a unit's model in the tank packs:
+// the path of its pack, its offset and its size. Most units sit in a pack
+// named after them; the others are found through an index of all packs.
+func (d *Data) Collision(v *dm.Vehicle) (path string, off int64, n int, err error) {
+	key := strings.ToLower(v.Model) + "_collision"
 	ref, ok := d.packs[key]
 	if !ok {
-		p, err := d.packTable(unit + ".grp")
+		p, err := d.packTable(v.ID + ".grp")
 		switch {
 		case err == nil:
-			ref, ok = refIn(p, unit+".grp", key)
+			ref, ok = refIn(p, v.ID+".grp", key)
 		case !errors.Is(err, fs.ErrNotExist):
-			return nil, err
+			return "", 0, 0, err
 		}
 	}
 	if !ok && d.packs == nil {
 		if err := d.indexPacks(); err != nil {
-			return nil, err
+			return "", 0, 0, err
 		}
 		ref, ok = d.packs[key]
 	}
 	if !ok {
-		return nil, fmt.Errorf("%s: no collision model %s in %s", unit, key, TanksDir)
+		return "", 0, 0, fmt.Errorf("%s: no collision model %s in %s", v.ID, key, TanksDir)
 	}
-	n := 64 << 20
+	n = 64 << 20
 	if ref.end >= 0 {
 		n = int(ref.end - ref.off)
 	}
-	raw, err := d.files.ReadAt(TanksDir+"/"+ref.file, ref.off, n)
-	if err != nil {
-		return nil, err
-	}
-	nodes, err := grp.ParseCollision(raw)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %s: %w", unit, key, err)
-	}
-	return nodes, nil
+	return TanksDir + "/" + ref.file, ref.off, n, nil
 }

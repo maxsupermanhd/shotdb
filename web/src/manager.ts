@@ -10,10 +10,12 @@ const fatal = (error: string) => self.postMessage(JSON.stringify({ op: "fatal", 
 
 let source: Source | null = null;
 const dirs = new Map<string, FileSystemDirectoryHandle>(); // directory path -> handle
+const files = new Map<string, File>(); // path -> file of a handle source, as getFile is slow
 
 function useSource(s: Source) {
   source = s;
   dirs.clear();
+  files.clear();
 }
 
 function missing(err: unknown): boolean {
@@ -23,11 +25,15 @@ function missing(err: unknown): boolean {
 async function fileOf(path: string): Promise<File | null> {
   if (!source) return null;
   if (source.kind === "files") return source.files.get(path) ?? null;
+  const known = files.get(path);
+  if (known) return known;
   const parts = path.split("/");
   const name = parts.pop()!;
   try {
     const dir = await dirOf(source.handle, parts);
-    return await (await dir.getFileHandle(name)).getFile();
+    const file = await (await dir.getFileHandle(name)).getFile();
+    files.set(path, file);
+    return file;
   } catch (err) {
     if (missing(err)) return null;
     throw err;
@@ -58,6 +64,11 @@ async function readRange(path: string, offset: number, length: number): Promise<
   return file ? new Uint8Array(await file.slice(offset, offset + length).arrayBuffer()) : null;
 }
 
+async function blob(path: string, offset: number, length: number): Promise<Blob | null> {
+  const file = await fileOf(path);
+  return file ? file.slice(offset, offset + length) : null;
+}
+
 async function listDir(path: string): Promise<string[] | null> {
   if (!source) return null;
   if (source.kind === "files") {
@@ -81,7 +92,7 @@ const ready = import(new URL("wasm_exec.js", self.location.href).href).then(asyn
   const go = new Go();
   const { instance } = await WebAssembly.instantiateStreaming(fetch("manager.wasm"), go.importObject);
   void go.run(instance).then(() => fatal("the manager stopped"));
-  manager.start(readFile, readRange, listDir, useSource);
+  manager.start(readFile, readRange, listDir, useSource, blob);
 });
 ready.catch((err) => fatal(message(err)));
 

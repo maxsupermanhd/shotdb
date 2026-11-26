@@ -4,13 +4,14 @@
 // the game files and the shot queue, and hands one target packet at a time
 // to the compute workers over their MessagePorts.
 //
-//	manager.start(readFile, readRange, listDir, useSource)  once, before any message
-//	manager.message(msg)                                   each message of the page
+//	manager.start(readFile, readRange, listDir, useSource, blob)  once, before any message
+//	manager.message(msg)                                         each message of the page
 //
 // readFile(path) and readRange(path, offset, length) must return a Promise of
-// a Uint8Array, listDir(path) a Promise of an array of file names; each gives
-// null when the file or directory does not exist. Paths are relative to the
-// directory of the source that useSource(source) set last.
+// a Uint8Array, listDir(path) a Promise of an array of file names, and
+// blob(path, offset, length) a Promise of a Blob of that range that reads
+// nothing yet; each gives null when the file or directory does not exist.
+// Paths are relative to the directory of the source that useSource(source) set last.
 //
 // Messages of the page:
 //
@@ -104,7 +105,7 @@ func main() {
 	started := make(chan struct{})
 	api := js.Global().Get("Object").New()
 	api.Set("start", js.FuncOf(func(_ js.Value, args []js.Value) any {
-		m.files = jsFiles{read: args[0], readRange: args[1], list: args[2]}
+		m.files = jsFiles{read: args[0], readRange: args[1], list: args[2], blob: args[4]}
 		m.useSource = args[3]
 		close(started)
 		return nil
@@ -336,16 +337,21 @@ func (m *manager) dispatch() bool {
 	}
 	id := m.queue[0]
 	m.queue = m.queue[1:]
+	// The compute worker reads and parses the collision resource from the blob, so that the manager does not.
+	var blob js.Value
 	pkt, err := guard(func() ([]byte, error) {
 		v, err := m.data.Vehicle(id)
 		if err != nil {
 			return nil, err
 		}
-		nodes, err := m.data.Nodes(v)
+		path, off, n, err := m.data.Collision(v)
 		if err != nil {
 			return nil, err
 		}
-		return packet.Target(v, nodes)
+		if blob, err = call(path, m.files.blob, path, float64(off), n); err != nil {
+			return nil, err
+		}
+		return packet.Target(v)
 	})
 	if err != nil {
 		m.finish(id, "", err)
@@ -353,7 +359,7 @@ func (m *manager) dispatch() bool {
 	}
 	w.flight = append(w.flight, job{m.gen, id})
 	post(map[string]any{"op": "start", "gen": m.gen, "target": id})
-	send(w, map[string]any{"op": "target", "gen": m.gen, "target": id}, pkt)
+	send(w, map[string]any{"op": "target", "gen": m.gen, "target": id, "blob": blob}, pkt)
 	m.progress()
 	return true
 }
@@ -484,7 +490,7 @@ func guard[T any](work func() (T, error)) (v T, err error) {
 }
 
 // jsFiles is game.Files over the worker's functions.
-type jsFiles struct{ read, readRange, list js.Value }
+type jsFiles struct{ read, readRange, list, blob js.Value }
 
 func call(name string, fn js.Value, args ...any) (js.Value, error) {
 	v, err := await(fn.Invoke(args...))
