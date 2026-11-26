@@ -21,7 +21,9 @@
 //	{op: "hold", n}            targets that a compute worker holds at once
 //	{op: "worker", id, port}   a compute worker joined; port is a MessagePort to it
 //	{op: "drop", id}           the page stops a compute worker; its targets go back in the queue
-//	{op: "failed", id, error}  a compute worker failed; its targets fail
+//	{op: "failed", id, error, gen, target}
+//	                           a compute worker failed in the shot at target of queue gen (both
+//	                           absent when it ran none): that target fails, the others go back
 //
 // Messages to the page are JSON strings, see web/src/types.ts.
 package main
@@ -155,10 +157,14 @@ func main() {
 			push(func(m *manager) { m.join(id, port) })
 		case "drop":
 			id := msg.Get("id").Int()
-			push(func(m *manager) { m.leave(id, nil) })
+			push(func(m *manager) { m.leave(id, nil, nil) })
 		case "failed":
 			id, text := msg.Get("id").Int(), msg.Get("error").String()
-			push(func(m *manager) { m.leave(id, fmt.Errorf("compute worker failed: %s", text)) })
+			var shot *job
+			if t := msg.Get("target"); t.Type() == js.TypeString {
+				shot = &job{msg.Get("gen").Int(), t.String()}
+			}
+			push(func(m *manager) { m.leave(id, shot, fmt.Errorf("compute worker failed: %s", text)) })
 		default:
 			post(map[string]any{"op": "error", "error": "manager: unknown message " + op})
 		}
@@ -437,9 +443,9 @@ func (m *manager) join(id int, port js.Value) {
 	}
 }
 
-// leave removes a worker. With no error its targets of this queue go back to
-// the front of the queue, else they fail with the error.
-func (m *manager) leave(id int, err error) {
+// leave removes a worker. The shot that it ran when it failed, if one, fails
+// with err. Its other targets of this queue go back to the front of the queue.
+func (m *manager) leave(id int, shot *job, err error) {
 	i := slices.IndexFunc(m.workers, func(w *worker) bool { return w.id == id })
 	if i < 0 {
 		return
@@ -454,7 +460,7 @@ func (m *manager) leave(id int, err error) {
 		if j.gen != m.gen {
 			continue
 		}
-		if err != nil {
+		if shot != nil && j == *shot {
 			m.finish(j.target, "", err)
 		} else {
 			back = append(back, j.target)

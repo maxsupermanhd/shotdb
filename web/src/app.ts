@@ -1,7 +1,7 @@
 // Tech trees and names from the opened game data, unit icons from the wiki's static content; shot results from the Go simulation.
 // The manager worker (manager.wasm) reads the game files and runs the queue. It hands the targets to a pool of compute
 // workers (compute.wasm) over MessagePorts. The page only draws and passes the user's actions to the manager.
-import type { Card, FromManager, GameInfo, Grid, Outcome, Plate, Progress, Rounds, Source, TargetResult, ToManager, Tree, Unit } from "./types";
+import type { Card, ComputeFatal, FromManager, GameInfo, Grid, Outcome, Plate, Progress, Rounds, Source, TargetResult, ToManager, Tree, Unit } from "./types";
 
 const RANKS = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"];
 const OUTCOMES: Outcome[] = ["kill", "pen", "shatter", "ricochet", "nonpen"];
@@ -41,6 +41,9 @@ tell({ op: "hold", n: Number(params.get("speed") ?? 2) });
 type Peer = { id: number; worker: Worker };
 const pool: Peer[] = [];
 let peerId = 0;
+// A failed worker gets a new one, but only RESTARTS times in a row with no good result between.
+const RESTARTS = 3;
+let restarts = 0;
 const cores = navigator.hardwareConcurrency || 2;
 setupWorkers();
 
@@ -67,6 +70,7 @@ function setupWorkers() {
   select.value = String(stored >= 1 && stored <= cores ? stored : Math.min(8, Math.max(1, Math.floor(cores / 2))));
   select.addEventListener("change", () => {
     localStorage.setItem("shotdb.workers", select.value);
+    restarts = 0;
     setWorkers(Number(select.value));
   });
   setWorkers(Number(select.value));
@@ -85,19 +89,26 @@ function setWorkers(n: number) {
     const { port1, port2 } = new MessageChannel();
     worker.postMessage({ port: port2 }, [port2]);
     tell({ op: "worker", id, port: port1 }, [port1]);
-    const fail = (error: string) => {
+    const fail = ({ error, gen, target }: ComputeFatal) => {
       const i = pool.findIndex((p) => p.id === id);
       if (i < 0) return;
       pool.splice(i, 1);
       worker.terminate();
-      tell({ op: "failed", id, error });
-      setStatus(`A compute worker failed: ${error}. ${pool.length} left.`, true);
+      tell({ op: "failed", id, error, gen, target });
+      if (restarts < RESTARTS) {
+        restarts++;
+        setWorkers(Number($<HTMLSelectElement>("#workers").value));
+        setStatus(`A compute worker failed: ${error}. A new one started.`, true);
+      } else {
+        setStatus(`A compute worker failed: ${error}. ${RESTARTS} failed in a row, so no new one started. ${pool.length} left.`, true);
+      }
+      progress();
     };
     worker.onerror = (e) => {
       e.preventDefault();
-      fail(e.message || "the worker did not load");
+      fail({ op: "fatal", error: e.message || "the worker did not load" });
     };
-    worker.onmessage = ({ data }: MessageEvent<{ op: "fatal"; error: string }>) => fail(data.error);
+    worker.onmessage = ({ data }: MessageEvent<ComputeFatal>) => fail(data);
     pool.push({ id, worker });
   }
 }
@@ -132,6 +143,7 @@ function onManager(msg: FromManager) {
       }
       break;
     case "result":
+      if ("result" in msg) restarts = 0;
       state.started.delete(msg.target);
       state.results.set(msg.target, "result" in msg ? msg.result : { target: msg.target, error: msg.error });
       paint(msg.target);
@@ -652,13 +664,14 @@ function hideTip() {
 
 function progress() {
   const { done, total, running, ms, paused, at } = state.progress;
+  const stopped = state.stopped || (!pool.length && done < total ? "all compute workers failed. Change the number of workers to start new ones." : "");
   const pause = $<HTMLButtonElement>("#pause");
-  pause.disabled = done >= total || !!state.stopped;
+  pause.disabled = done >= total || !!stopped;
   pause.textContent = paused ? "Resume" : "Pause";
   $("#progress-fill").style.width = `${total ? (100 * done) / total : 0}%`;
   const text = $("#progress-text");
-  if (state.stopped) {
-    text.textContent = `Stopped: ${state.stopped}`;
+  if (stopped) {
+    text.textContent = `Stopped: ${stopped}`;
     return;
   }
   if (!total) {

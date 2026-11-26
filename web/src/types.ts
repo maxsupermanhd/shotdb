@@ -104,7 +104,7 @@ export type ToManager =
   | { op: "hold"; n: number }
   | { op: "worker"; id: number; port: MessagePort }
   | { op: "drop"; id: number }
-  | { op: "failed"; id: number; error: string };
+  | { op: "failed"; id: number; error: string; gen?: number; target?: string };
 
 export interface Progress {
   done: number;
@@ -139,4 +139,12 @@ export interface FromCompute {
   gen: number;
   target: string;
   result?: string;
+}
+
+// Compute worker -> page when it fails. gen and target name the shot that it ran, if one.
+export interface ComputeFatal {
+  op: "fatal";
+  error: string;
+  gen?: number;
+  target?: string;
 }
