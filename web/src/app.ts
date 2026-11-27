@@ -14,8 +14,9 @@ const nationsParam = params.get("nations");
 const state = {
   shooter: "", // none until the user picks one
   nations: nationsParam ? new Set(nationsParam.split(",")) : null as Set<string> | null, // null: all
-  // "all": the shown trees side by side; "nation": one tree, the nation chips change it
-  view: (params.get("view") ?? localStorage.getItem("shotdb.view")) === "nation" ? "nation" : "all",
+  // "vertical": the shown trees side by side; "horizontal": each tree on its side, one under the other;
+  // "compact": the vertical view with small square tiles; "nation": one tree
+  view: firstView(),
   nation: params.get("nation") ?? localStorage.getItem("shotdb.nation") ?? "",
   game: new Map<string, Unit>(), // from the opened game data
   results: new Map<string, TargetResult>(),
@@ -32,6 +33,15 @@ const state = {
   stopped: "", // why the queue stopped, when the manager failed
   byLabel: new Map<string, string>(),
 };
+
+type View = "vertical" | "horizontal" | "compact" | "nation";
+// The vertical view had the name "all" before.
+function firstView(): View {
+  const v = params.get("view") ?? localStorage.getItem("shotdb.view");
+  if (v === "horizontal" || v === "compact" || v === "nation") return v;
+  // Compact was a toggle of its own before, on top of the view of all trees.
+  return !params.has("view") && localStorage.getItem("shotdb.compact") === "1" ? "compact" : "vertical";
+}
 
 const $ = <T extends HTMLElement = HTMLElement>(s: string) => document.querySelector<T>(s)!;
 // WT font glyphs (origin and event markers) that a normal font cannot draw
@@ -77,10 +87,10 @@ const icons = new IntersectionObserver((entries) => {
 }, { root: $("#trees").parentElement, rootMargin: "400px" });
 setupTrees();
 setupLines();
-setupCompact();
 setupView();
 setupPicker();
 setupConfirm();
+setupSettings();
 setupOpen();
 
 // Default: half of the cores, at most 8.
@@ -258,7 +268,11 @@ function setupTrees() {
     choose({ shooter: state.shooter, round, lines: lines() }, round < 0 ? `Fire the best of all ${r.length} rounds?` : `Fire only ${r[i].name}?`);
   });
   $("#pause").addEventListener("click", () => tell({ op: "pause" }));
-  main.innerHTML = `<p class="empty">Open the War Thunder install folder to show the research trees.</p>`;
+  new ResizeObserver(() => {
+    if (!state.rounds?.rounds.length || $(".bar").clientWidth === roundsWidth) return;
+    roundsPanel();
+    progress();
+  }).observe($(".bar"));
   $("#progress-text").textContent = "Open a game folder to run the shots";
 }
 
@@ -281,6 +295,7 @@ function render() {
       applyNations();
     });
     nav.append(chip);
+    if (state.view === "horizontal") continue;
 
     const head = document.createElement("h2");
     head.className = `nation-head n-${tree.country}`;
@@ -299,11 +314,102 @@ function render() {
       main.append(block);
     }
   }
+  if (state.view === "horizontal") horizontal(main);
   // The queue can be older than the trees: the held data of an older open shows after the queue of that open started.
   cards.get(state.shooter)?.forEach((el) => el.classList.add("shooter"));
   for (const id of state.started) cards.get(id)?.forEach((el) => el.classList.add("running"));
   for (const id of state.results.keys()) paint(id);
   applyNations();
+  markRuler();
+  centerShooter();
+}
+
+const NAME_W = 120; // px, the column of the nation names in the horizontal view
+const SLOT = 96; // px, a card and the gap after it
+const RANK_GAP = 24; // px between two rank columns
+
+// The horizontal view: each nation tree on its side. Each nation is a band, and each research or premium line is
+// a row of the band. The columns are the ranks. A rank column is as wide as the widest nation needs at that rank,
+// so the ranks line up in all bands. In a rank, the rows of the game tree are the x order. The cards of a folder
+// stand side by side, and an x place is as wide as the largest folder at that place in the nation.
+function horizontal(main: HTMLElement) {
+  const ranks = [...new Set(trees.flatMap((t) => t.ranks.map((r) => r.n)))].sort((a, b) => a - b);
+  if (!ranks.length) return;
+  const col = new Map(ranks.map((n, i) => [n, i + 2]));
+  const places = (g: Grid) => (g.rows ?? []).map((row) => Math.max(0, ...row.map((cell) => cell?.length ?? 0)));
+  const width = (g: Grid) => places(g).reduce((a, p) => a + p * SLOT, 0) - 4;
+  const rankW = new Map<number, number>();
+  for (const tree of trees) {
+    for (const r of tree.ranks) rankW.set(r.n, Math.max(rankW.get(r.n) ?? 0, width(r.research), width(r.premium)));
+  }
+  main.style.setProperty("--hcols", `${NAME_W}px ${ranks.map((n) => `${rankW.get(n)}px`).join(" ")}`);
+  main.style.setProperty("--rank-gap", `${RANK_GAP}px`);
+
+  const ruler = document.createElement("div");
+  ruler.className = "h-ruler";
+  ruler.innerHTML = `<div class="h-corner">Rank</div>` + ranks.map((n) => `<div class="h-rank" data-rank="${n}">Rank ${RANKS[n - 1]}</div>`).join("");
+  main.append(ruler);
+  for (const tree of trees) {
+    // the lines of the tree: the columns of the game tree grids that hold a card in a rank
+    const lines = (kind: "research" | "premium") => [...new Set(tree.ranks.flatMap((r) => (r[kind].rows ?? []).flatMap((row) => row.flatMap((cell, c) => (cell?.length ? [c] : [])))))].sort((a, b) => a - b);
+    const research = lines("research"), premium = lines("premium");
+    const r = research.length, p = premium.length;
+    const rows = r + (p ? p + 1 : 0);
+    const band = document.createElement("section");
+    band.className = `h-band n-${tree.country}`;
+    band.innerHTML = ranks.slice(1).map((n) => `<i class="h-guide" style="grid-column:${col.get(n)};grid-row:1 / span ${rows}"></i>`).join("")
+      + `<div class="h-name" style="grid-row:1 / span ${Math.max(1, r)}"><span class="h-label"><b>${esc(tree.name)}</b><span class="sub">Researchable</span></span></div>`
+      + (p ? `<i class="h-split" style="grid-row:${r + 1}"></i><div class="h-name" style="grid-row:${r + 1} / span ${p + 1}"><span class="h-label"><b>${esc(tree.name)}</b><span class="sub">Premium</span></span></div>` : "");
+    for (const rank of tree.ranks) {
+      for (const [kind, list, first] of [["research", research, 1], ["premium", premium, r + 2]] as const) {
+        const g = rank[kind];
+        const template = places(g).map((n) => `${Math.max(0, n * SLOT - 4)}px`).join(" ");
+        list.forEach((c, i) => {
+          const stacks = (g.rows ?? []).flatMap((row, x) => (row[c]?.length ? [{ x, cell: row[c]! }] : []));
+          if (!stacks.length) return;
+          const line = document.createElement("div");
+          line.className = "h-cell";
+          line.style.gridArea = `${first + i} / ${col.get(rank.n)}`;
+          line.style.gridTemplateColumns = template;
+          for (const { x, cell } of stacks) {
+            const stack = document.createElement("div");
+            stack.className = "h-stack";
+            stack.style.gridColumn = String(x + 1);
+            stack.append(...cell.map(card));
+            line.append(stack);
+          }
+          band.append(line);
+        });
+      }
+    }
+    main.append(band);
+  }
+}
+
+function markRuler() {
+  const rank = state.game.get(state.shooter)?.rank;
+  document.querySelectorAll<HTMLElement>(".h-rank").forEach((el) => el.classList.toggle("at", Number(el.dataset.rank) === rank));
+}
+
+// The horizontal view scrolls sideways to the shooter's rank column, right of the nation names. When the column is
+// wider than the view, the shooter's card goes to the middle of the view, or the column start comes to the left
+// when the shooter's nation is hidden. The vertical position does not change. With no shooter the view goes to the left end.
+function centerShooter() {
+  if (state.view !== "horizontal") return;
+  const view = $("main.trees");
+  const behavior: ScrollBehavior = still.matches ? "instant" : "smooth";
+  const label = document.querySelector<HTMLElement>(`.h-rank[data-rank="${state.game.get(state.shooter)?.rank}"]`);
+  if (!label) return view.scrollTo({ left: 0, behavior });
+  const room = view.clientWidth - NAME_W;
+  const start = label.offsetLeft - NAME_W - RANK_GAP / 2;
+  const w = label.offsetWidth + RANK_GAP;
+  let left = start + (w - room) / 2;
+  if (w > room) {
+    const el = cards.get(state.shooter)?.find((c) => c.offsetParent);
+    const x = el ? el.getBoundingClientRect().left + el.offsetWidth / 2 - $("#trees").getBoundingClientRect().left : 0;
+    left = el ? Math.min(Math.max(x - NAME_W - room / 2, start), start + w - room) : start;
+  }
+  view.scrollTo({ left, behavior });
 }
 
 function grid({ cols, rows }: Grid, kind: string) {
@@ -341,6 +447,7 @@ function loadIcon(el: HTMLElement) {
   const img = document.createElement("img");
   img.className = "card-icon";
   img.alt = "";
+  img.draggable = false; // else a drag of the horizontal view drags the picture
   img.src = `https://static.encyclopedia.warthunder.com/slots/${el.dataset.id}.png`;
   img.addEventListener("error", () => img.remove());
   el.prepend(img);
@@ -356,29 +463,52 @@ function applyNations() {
   const one = state.view === "nation";
   if (one && trees.length && !trees.some((t) => t.country === state.nation)) state.nation = trees[0].country;
   document.body.classList.toggle("one-nation", one);
-  $("#view-all").classList.toggle("on", !one);
-  $("#view-nation").classList.toggle("on", one);
+  document.body.classList.toggle("compact", state.view === "compact");
+  document.body.classList.toggle("horizontal", state.view === "horizontal");
+  document.querySelectorAll<HTMLElement>(".view-ctl .chip").forEach((b) => {
+    b.classList.toggle("on", b.dataset.view === state.view);
+    b.setAttribute("aria-pressed", String(b.dataset.view === state.view));
+  });
   let col = 0;
   for (const tree of trees) {
     const on = one ? tree.country === state.nation : !state.nations || state.nations.has(tree.country);
     if (on) col++;
     document.querySelectorAll<HTMLElement>(`.n-${tree.country}`).forEach((el) => {
       el.hidden = !on;
-      el.style.gridColumn = String(col);
+      if (state.view !== "horizontal") el.style.gridColumn = String(col);
     });
-    const chip = document.querySelector<HTMLElement>(`.chip[data-country="${tree.country}"]`)!;
+    const chip = $(`#nations .chip[data-country="${tree.country}"]`);
     chip.classList.toggle("on", on);
     chip.setAttribute("aria-pressed", String(on));
   }
+  shooterNation();
   syncUrl();
   fitCompact();
+  sides();
+}
+
+// The chip of the shooter's nation has a mark of its own, in each view.
+function shooterNation() {
+  const country = state.game.get(state.shooter)?.country;
+  document.querySelectorAll<HTMLElement>("#nations .chip").forEach((chip) => {
+    const mark = chip.dataset.country === country;
+    chip.classList.toggle("shooter-nation", mark);
+    chip.title = mark ? "The nation of the shooter" : "";
+  });
 }
 
 const still = matchMedia("(prefers-reduced-motion: reduce)");
+const SIDE_MIN = 56; // px; under this, the side controls go into the line of nation chips
+
+// the nation at step steps from the shown one, around the end of the list
+function neighbour(step: number) {
+  const i = trees.findIndex((t) => t.country === state.nation);
+  return trees[(i + step + trees.length) % trees.length];
+}
 
 // Shows the tree of country in the nation view. The new tree slides in from the side of its chip,
-// unless the user asks for reduced motion.
-function showNation(country: string, slide = true) {
+// or from the side of the step (-1 or 1), unless the user asks for reduced motion.
+function showNation(country: string, slide = true, step = 0) {
   const from = trees.findIndex((t) => t.country === state.nation);
   const to = trees.findIndex((t) => t.country === country);
   if (to < 0 || country === state.nation) return;
@@ -388,48 +518,121 @@ function showNation(country: string, slide = true) {
   const view = $("#trees").parentElement!;
   view.scrollTo({ left: 0, top: 0 });
   if (slide && !still.matches) {
-    $("#trees").animate([{ transform: `translateX(${to > from ? 64 : -64}px)`, opacity: 0 }, { transform: "none", opacity: 1 }],
+    $("#trees").animate([{ transform: `translateX(${(step || to - from) > 0 ? 64 : -64}px)`, opacity: 0 }, { transform: "none", opacity: 1 }],
       { duration: 220, easing: "cubic-bezier(.2, .7, .3, 1)" });
   }
 }
 
-// All the shown trees side by side, or one nation at a time; the left and right arrow keys change the nation.
+// In the nation view, the free space at the left and the right of the tree are the controls for the previous
+// and the next nation. They stay in place while the trees scroll.
+function sides() {
+  const main = $("main.trees");
+  const one = state.view === "nation" && trees.length > 1;
+  const side = one ? Math.floor((main.clientWidth - $("#trees").offsetWidth) / 2) : 0;
+  const wide = side >= SIDE_MIN;
+  for (const [id, step] of [["#side-prev", -1], ["#side-next", 1]] as const) {
+    const button = $(id);
+    button.hidden = !wide;
+    if (!wide) continue;
+    const name = neighbour(step).name;
+    button.style.width = `${side}px`;
+    button.style.bottom = `${main.offsetHeight - main.clientHeight}px`;
+    button.querySelector(".side-name")!.textContent = name;
+    button.title = `${step < 0 ? "Previous" : "Next"} nation: ${name}`;
+  }
+  $("#side-next").style.right = `${main.offsetWidth - main.clientWidth}px`;
+  $("#step-prev").hidden = $("#step-next").hidden = !one || wide;
+}
+
+// Vertical, Horizontal, Compact or one nation; in the nation view the left and right arrow keys change the nation.
 function setupView() {
-  const set = (view: "all" | "nation") => {
+  const set = (view: View) => {
+    if (view === state.view) return;
+    // a change to the nation view starts at the first nation
+    if (view === "nation") state.nation = trees[0]?.country ?? "";
+    // the horizontal view has cards of its own
+    const build = (view === "horizontal") !== (state.view === "horizontal");
     state.view = view;
     localStorage.setItem("shotdb.view", view);
-    if (trees.length) applyNations();
+    localStorage.removeItem("shotdb.compact");
+    hideTip();
+    $("#trees").parentElement!.scrollTo({ left: 0, top: 0 });
+    if (build) {
+      $("#trees").style.removeProperty("--hcols");
+      render();
+    } else applyNations();
   };
-  $("#view-all").addEventListener("click", () => set("all"));
-  $("#view-nation").addEventListener("click", () => set("nation"));
-  $("#view-all").classList.toggle("on", state.view === "all");
-  $("#view-nation").classList.toggle("on", state.view === "nation");
+  document.querySelectorAll<HTMLElement>(".view-ctl .chip").forEach((b) => b.addEventListener("click", () => set(b.dataset.view as View)));
+  const main = $("main.trees");
+  for (const [ids, step] of [[["#side-prev", "#step-prev"], -1], [["#side-next", "#step-next"], 1]] as const) {
+    for (const id of ids) $(id).addEventListener("click", () => showNation(neighbour(step).country, true, step));
+    // the side controls lie over the view, so the wheel goes on to the trees under them
+    $(ids[0]).addEventListener("wheel", (e) => {
+      e.preventDefault();
+      const k = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? main.clientHeight : 1;
+      main.scrollBy(e.deltaX * k, e.deltaY * k);
+    }, { passive: false });
+  }
   addEventListener("keydown", (e) => {
-    if (state.view !== "nation" || !trees.length || asking || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    if (state.view !== "nation" || !trees.length || asking || $<HTMLDialogElement>("#settings").open || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
     if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || e.target instanceof HTMLTextAreaElement) return;
     e.preventDefault();
-    const i = trees.findIndex((t) => t.country === state.nation);
-    showNation(trees[(i + (e.key === "ArrowRight" ? 1 : trees.length - 1)) % trees.length].country);
+    const step = e.key === "ArrowRight" ? 1 : -1;
+    showNation(neighbour(step).country, true, step);
   });
+  // the view changes size with the window and with the header (the rounds panel)
+  const resized = new ResizeObserver(() => {
+    fitCompact();
+    sides();
+  });
+  resized.observe(main);
+  resized.observe($("#trees"));
+  setupDrag(main);
+  applyNations();
 }
 
+const DRAG = 5; // px; a press that moves less is a click
 
-function setupCompact() {
-  const button = $("#compact");
-  const set = (on: boolean) => {
-    document.body.classList.toggle("compact", on);
-    button.classList.toggle("on", on);
-    fitCompact();
-  };
-  button.addEventListener("click", () => {
-    const on = !document.body.classList.contains("compact");
-    localStorage.setItem("shotdb.compact", on ? "1" : "0");
-    set(on);
+// In the horizontal view, a drag with the left mouse button moves the view. A drag is not a click on a card.
+function setupDrag(view: HTMLElement) {
+  let drag: { x: number; y: number; left: number; top: number; moved: boolean } | null = null;
+  let swallow = false;
+  view.addEventListener("pointerdown", (e) => {
+    if (state.view !== "horizontal" || e.pointerType !== "mouse" || e.button !== 0) return;
+    // a press on the scrollbars is not a drag
+    const r = view.getBoundingClientRect();
+    if (e.clientX - r.left >= view.clientLeft + view.clientWidth || e.clientY - r.top >= view.clientTop + view.clientHeight) return;
+    if ((e.target as Element).closest("button, input, select, a")) return;
+    drag = { x: e.clientX, y: e.clientY, left: view.scrollLeft, top: view.scrollTop, moved: false };
   });
-  set(localStorage.getItem("shotdb.compact") === "1");
-  // the view changes size with the window and with the header (the rounds panel)
-  new ResizeObserver(() => fitCompact()).observe($("#trees").parentElement!);
+  addEventListener("pointermove", (e) => {
+    if (!drag) return;
+    const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+    if (!drag.moved) {
+      if (Math.hypot(dx, dy) < DRAG) return;
+      drag.moved = true;
+      document.body.classList.add("dragging");
+      hideTip();
+    }
+    view.scrollTo(drag.left - dx, drag.top - dy);
+  });
+  const end = () => {
+    if (drag?.moved) {
+      // the click comes after pointerup in the same task
+      swallow = true;
+      setTimeout(() => (swallow = false));
+    }
+    drag = null;
+    document.body.classList.remove("dragging");
+  };
+  addEventListener("pointerup", end);
+  addEventListener("pointercancel", end);
+  view.addEventListener("click", (e) => {
+    if (!swallow) return;
+    e.stopPropagation();
+    e.preventDefault();
+  }, true);
 }
 
 // The compact grid is only as wide as the shown trees, and its width is linear in the tile
@@ -437,7 +640,7 @@ function setupCompact() {
 function fitCompact() {
   const main = $("#trees");
   const note = $("#compact-note");
-  if (!document.body.classList.contains("compact") || !main.querySelector(".nation-head:not([hidden])")) {
+  if (state.view !== "compact" || !main.querySelector(".nation-head:not([hidden])")) {
     main.style.removeProperty("--tile");
     main.style.removeProperty("--pic");
     note.textContent = "";
@@ -483,14 +686,6 @@ function fillPicker() {
 let saved: FileSystemDirectoryHandle | null = null; // the remembered folder
 
 function setupOpen() {
-  const folder = $("#folder");
-  // the popover opens under the chip
-  folder.addEventListener("beforetoggle", (e) => {
-    if ((e as ToggleEvent).newState !== "open") return;
-    const r = $("#data-chip").getBoundingClientRect();
-    folder.style.left = `${Math.max(8, Math.min(r.left, innerWidth - 436))}px`;
-    folder.style.top = `${r.bottom + 6}px`;
-  });
   if (!window.showDirectoryPicker) {
     // Firefox: a dropped folder or a folder input. Both give File objects that the page reads in the browser.
     // The input exists only here, so that browsers with the File System Access API never use it.
@@ -536,9 +731,9 @@ function setupOpen() {
       }
       await openFiles(seq, files, entry.name);
     });
-    $("#trees").innerHTML = `<p class="empty">Press <b>Open game folder</b> or drop the War Thunder install folder on this page to show the research trees.<br>`
-      + `The browser can call this an upload, but the files stay on this computer: the page reads them here and sends nothing.<br>`
-      + `This browser cannot remember the folder, so open it again on each visit.</p>`;
+    $("#start-text").innerHTML = `Press <b>Open game folder</b> or drop the War Thunder install folder (with aces.vromfs.bin) on this page. `
+      + `The browser can call this an upload, but the files stay on this computer: the page reads them here and sends nothing. `
+      + `This browser cannot remember the folder, so open it again on each visit.`;
     $("#drop-note").hidden = false;
     return setStatus("Open or drop the War Thunder install folder. This browser cannot remember the folder.");
   }
@@ -665,7 +860,6 @@ async function openSource(src: Source, label: string) {
   const id = ++openSeq;
   open.disabled = true;
   setStatus(`Loading ${label}…`);
-  $("#data-chip").textContent = `Loading ${label}…`;
   const { info, error } = await new Promise<Opened>((resolve) => {
     opens.set(id, resolve);
     tell({ op: "open", id, source: src });
@@ -685,42 +879,40 @@ async function openSource(src: Source, label: string) {
     fillPicker();
     shown = { src: data.src, label: data.label };
     const inTree = [...cards.keys()].filter((id) => state.game.has(id)).length;
-    summary = { full: `${data.label} · ${data.info.source}${data.info.version ? ` ${data.info.version}` : ""} · ${inTree} vehicles`, short: `${data.info.version || data.info.source} · ${inTree} vehicles` };
+    const summary = $("#data-summary");
+    summary.textContent = `Game data: ${data.label} · ${data.info.source}${data.info.version ? ` ${data.info.version}` : ""} · ${inTree} vehicles`;
+    summary.hidden = false;
   }
   folderMode();
-  const chip = $("#data-chip");
-  chip.textContent = summary.short;
-  chip.title = `${summary.full}. Press to change, reopen or forget the game folder.`;
   if (!info) {
     setStatus(error!, true);
     return false;
   }
-  setStatus(summary.full);
-  const folder = $("#folder");
-  if (folder.matches(":popover-open")) folder.hidePopover();
+  setStatus("");
   return true; // the manager keeps the shooter that the user picked before, if the new data has it
 }
 
+// With game data on the page, the status is in the settings. So an error also shows under the header,
+// and the cog gets a mark until the user hides the message.
 function setStatus(text: string, error = false) {
   const el = $("#data-status");
   el.textContent = text;
   el.classList.toggle("error", error);
-  // the status lies in the closed popover when the page shows game data, so an error also shows next to the chip
-  const note = $("#chip-note");
-  note.textContent = text;
-  note.hidden = !(error && shown);
-  $("#data-chip").classList.toggle("error", error && !!shown);
+  $("#notice-text").textContent = text;
+  showNotice(error && !!shown);
 }
 
-let summary = { full: "", short: "" }; // of the game data on the page
+function showNotice(on: boolean) {
+  $("#notice").hidden = !on;
+  $("#cog").classList.toggle("alert", on);
+}
 
-// With game data on the page, the folder controls go in the popover of the chip. Before the first good
-// open, and while no open has given data, they lie in the bar.
+// Before the first good open, and while no open has given data, the folder controls stand in the
+// middle of the page. Once the page shows game data, they go into the settings.
 function folderMode() {
-  const folder = $("#folder");
-  $("#data-chip").hidden = !shown;
-  if (shown && !folder.popover) folder.popover = "auto";
-  if (!shown) folder.removeAttribute("popover");
+  $(shown ? "#folder-slot" : "#start").append($("#folder"));
+  $("#start").hidden = !!shown;
+  $("#folder-away").hidden = !!shown;
   if (!window.showDirectoryPicker) $("#open").textContent = shown ? "Open another folder" : "Open game folder";
 }
 
@@ -769,18 +961,53 @@ async function choose(c: Choice, question: string, cancel?: () => void) {
   const { done, total } = state.progress;
   $("#confirm-text").textContent = `${question} The queue of ${name(state.shooter)} stops at ${done} / ${total}; its results stay kept.`
     + (have ? ` ${have} of the new results are kept already.` : "");
-  const bar = $("#confirm");
-  bar.style.top = `${$("main.trees").getBoundingClientRect().top + 8}px`;
-  bar.hidden = false;
+  placeConfirm();
+  $("#confirm").hidden = false;
   $("#confirm-run").focus();
+}
+
+// The open settings make the rest of the page inert, so there the bar stands in the settings.
+function placeConfirm() {
+  const bar = $("#confirm");
+  const inside = $<HTMLDialogElement>("#settings").open;
+  (inside ? $("#confirm-slot") : document.body).append(bar);
+  bar.classList.toggle("inline", inside);
+  bar.style.top = inside ? "" : `${$("main.trees").getBoundingClientRect().top + 8}px`;
 }
 
 function answer(yes: boolean) {
   const a = asking;
   asking = null;
-  $("#confirm").hidden = true;
+  const bar = $("#confirm");
+  // the focus goes back to Shots when the bar stands in the settings, as the hidden bar cannot keep it
+  if (bar.contains(document.activeElement) && $<HTMLDialogElement>("#settings").open) $("#lines").focus();
+  bar.hidden = true;
   if (!a) return;
   yes ? run(a.c) : a.cancel?.();
+}
+
+function setupSettings() {
+  const dialog = $<HTMLDialogElement>("#settings");
+  const cog = $("#cog");
+  const open = () => {
+    if (!dialog.open) dialog.showModal();
+    if (!asking) return;
+    placeConfirm();
+    $("#confirm-run").focus();
+  };
+  cog.addEventListener("click", open);
+  $("#notice-open").addEventListener("click", open);
+  $("#notice-close").addEventListener("click", () => showNotice(false));
+  $("#settings-close").addEventListener("click", () => dialog.close());
+  // the dialog has no padding, so a click on the dialog itself is a click on the backdrop
+  dialog.addEventListener("click", (e) => {
+    const r = dialog.getBoundingClientRect();
+    if (e.target === dialog && (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom)) dialog.close();
+  });
+  dialog.addEventListener("close", () => {
+    if (asking) placeConfirm();
+    cog.focus();
+  });
 }
 
 function setupConfirm() {
@@ -788,7 +1015,10 @@ function setupConfirm() {
   $("#confirm-cancel").addEventListener("click", () => answer(false));
   addEventListener("keydown", (e) => {
     if (!asking) return;
-    if (e.key === "Escape") answer(false);
+    if (e.key === "Escape") {
+      e.preventDefault(); // the settings stay open
+      answer(false);
+    }
     // Enter on a focused button clicks it already
     else if (e.key === "Enter" && !(e.target instanceof HTMLButtonElement || e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement)) answer(true);
   });
@@ -813,6 +1043,7 @@ function shooterInfo(note = "") {
 // A new queue of the manager: outwards from the shooter's BR, or none when no shooter is picked.
 function newQueue(q: Extract<FromManager, { op: "queue" }>) {
   answer(false); // the question is about the old queue
+  const moved = q.shooter !== state.shooter;
   if (state.shooter && q.shooter !== state.shooter) prev = { shooter: state.shooter, round: state.round, lines: state.lines };
   state.gen = q.gen;
   state.shooter = q.shooter;
@@ -845,13 +1076,15 @@ function newQueue(q: Extract<FromManager, { op: "queue" }>) {
   } else {
     input.value = pickerLabel(state.shooter);
     // a long name makes the box wider, so that the name shows in full
-    const picker = input.parentElement!;
-    picker.style.width = "";
-    if (input.scrollWidth > input.clientWidth) picker.style.width = `${picker.offsetWidth + input.scrollWidth - input.clientWidth + 4}px`;
+    input.style.width = "";
+    if (input.scrollWidth > input.clientWidth) input.style.width = `min(${input.offsetWidth + input.scrollWidth - input.clientWidth + 4}px, calc(100vw - 140px))`;
     shooterInfo(state.rounds && !state.rounds.rounds.length ? "no gun of 20 mm or more that attacks armour" : "");
     cards.get(state.shooter)?.forEach((el) => el.classList.add("shooter"));
     $("#trees").classList.remove("idle");
   }
+  shooterNation();
+  markRuler();
+  if (moved) centerShooter();
   roundsPanel();
   if (q.error) $("#rounds").textContent = `Cannot read the rounds: ${q.error}`;
   progress();
@@ -914,6 +1147,8 @@ function pinHover() {
 function roundsPanel() {
   const panel = $("#rounds");
   const r = state.rounds;
+  roundsWidth = 0;
+  $(".bar").classList.remove("under");
   panel.classList.toggle("forced", state.round >= 0);
   if (!state.shooter) {
     panel.innerHTML = `<div class="rounds-head">Pick a shooter: its gun and rounds show here</div>`;
@@ -927,12 +1162,10 @@ function roundsPanel() {
   const head = state.round >= 0
     ? `only <b>${esc(r.rounds[state.round].name)}</b> · ${r.range} m · ${state.lines} lines <span class="hint">· click it again for the best of all</span>`
     : `best of ${r.rounds.length} round${r.rounds.length === 1 ? "" : "s"} per target · ${r.range} m · ${state.lines} lines a round <span class="hint">· click a round to fire only it</span>`;
-  // Each gun's rounds go in tables of at most ROWS rows, side by side, so that the header stays low.
-  const ROWS = 4;
-  const tables: string[] = [];
-  for (const gun of new Set(r.rounds.map((s) => s.gun))) {
-    const list = r.rounds.filter((s) => s.gun === gun);
-    const size = Math.ceil(list.length / Math.ceil(list.length / ROWS));
+  const guns = [...new Set(r.rounds.map((s) => s.gun))].map((gun) => r.rounds.filter((s) => s.gun === gun));
+  const tables = (most: number) => guns.map((list) => {
+    const size = Math.ceil(list.length / Math.ceil(list.length / most));
+    const out: string[] = [];
     for (let k = 0; k < list.length; k += size) {
       const rows = list.slice(k, k + size).map((s) => {
         const filler = s.filler ? `${+(s.filler * 1000).toFixed(1)} <span class="muted">${esc(s.explosive.replaceAll("_", " "))}</span>` : "";
@@ -940,13 +1173,33 @@ function roundsPanel() {
           + `<td>${shellType(s.type)}</td><td>${+s.caliber.toFixed(1)}</td><td>${s.mass.toFixed(s.mass >= 1 ? 2 : 3)}</td><td>${s.speed}</td>`
           + `<td>${Math.round(s.pen)}</td><td>${filler}</td><td class="r-wins">0</td></tr>`;
       }).join("");
-      tables.push(`<table><caption>${esc(gun)}</caption>`
+      out.push(`<table><caption>${esc(list[0].gun)}</caption>`
         + `<tr><th></th><th>type</th><th>mm</th><th>kg</th><th title="muzzle speed">m/s</th><th title="flat penetration at ${r.range} m">pen mm</th><th title="filler mass and explosive">filler g</th><th title="targets this round was best on">best</th></tr>`
         + rows + `</table>`);
     }
+    return out.join("");
+  }).join("");
+  // Each gun's rounds go in tables of at most a number of rows, side by side. The rounds stand right of the
+  // search section or under it. The page tries each layout and keeps the lowest header, so that no round is
+  // hidden. On a tie, it keeps the rounds at the right, and then more rows.
+  const bar = panel.parentElement!;
+  const most = Math.max(...guns.map((l) => l.length));
+  const show = (under: boolean, n: number) => {
+    bar.classList.toggle("under", under);
+    panel.innerHTML = `<div class="rounds-head">${head}</div><div class="rounds-list">${tables(n)}</div>`;
+    return bar.offsetHeight;
+  };
+  let best = { under: false, n: 0 }, low = Infinity;
+  for (const under of [false, true]) {
+    for (let n = Math.min(3, most); n <= most; n++) {
+      const h = show(under, n);
+      if (h < low || (h === low && under === best.under)) [best, low] = [{ under, n }, h];
+    }
   }
-  panel.innerHTML = `<div class="rounds-head">${head}</div><div class="rounds-list">${tables.join("")}</div>`;
+  show(best.under, best.n);
+  roundsWidth = panel.parentElement!.clientWidth;
 }
+let roundsWidth = 0; // of the header at the last layout of the rounds
 
 function highlightRound(index: number) {
   document.querySelectorAll<HTMLElement>("#rounds .round").forEach((el) => el.classList.toggle("hl", Number(el.dataset.index) === index));
@@ -1078,13 +1331,8 @@ function syncUrl() {
   p.delete("shooter"); // from older links: the page does not pick a shooter by itself
   p.delete("mode");
   !state.nations || state.nations.size === trees.length ? p.delete("nations") : p.set("nations", [...state.nations].join(","));
-  if (state.view === "nation") {
-    p.set("view", "nation");
-    p.set("nation", state.nation);
-  } else {
-    p.delete("view");
-    p.delete("nation");
-  }
+  state.view === "vertical" ? p.delete("view") : p.set("view", state.view);
+  state.view === "nation" ? p.set("nation", state.nation) : p.delete("nation");
   history.replaceState(null, "", `?${p}`);
 }
 

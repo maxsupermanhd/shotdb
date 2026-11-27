@@ -42,7 +42,7 @@ other static server also works. The GitHub Pages workflow runs `build.sh` and pu
 The game files never go through the server: the page reads them in the browser, from the
 folder that you pick.
 
-Open the page, press **Open game folder** and pick the **War Thunder install folder** (the
+Open the page, press **Open game folder** in the middle of the page and pick the **War Thunder install folder** (the
 one with `aces.vromfs.bin`). The page reads `aces.vromfs.bin`, `char.vromfs.bin`,
 `lang.vromfs.bin`, `warthunder.yup` (for the version), the vehicle model packs in
 `content/base/res/tanks/*.grp`. Of the packs it reads only the parts it needs.
@@ -80,25 +80,27 @@ not work this way.
 In these browsers, a folder without `aces.vromfs.bin` at its top gives an error, and the data
 on the page stays.
 
-Before the first good open, and while no open has given data, the folder controls lie in the
-header as above. Once the page shows game data, they go into a small chip next to the brand
-(for example "2.61.0.42 · 1254 vehicles"). Press it for a popover with the folder, the source,
-the version and the buttons: **Choose another**, **Reopen** and **Forget** in Chromium
-browsers, **Open another folder** and a note on drag-and-drop in the others. Drag-and-drop
-works at all times. When an open fails and the old data stays, the chip turns red and the error
-shows under it. When you pick or drop a folder while the page still reads an older one,
-the page opens only the newest folder.
+Before the first good open, and while no open has given data, the folder controls stand in the
+middle of the page: the buttons above, the status or the error, and in Firefox a note on
+drag-and-drop. Once the page shows game data, the controls go into the **Game folder** part of
+the settings (see [Settings](#settings)). There the page also shows the folder, the source, the
+version and the number of vehicles. In Firefox the button is then **Open another folder**.
+Drag-and-drop works at all times. When an open fails and the old data stays, the error shows in
+a line under the header, and the cog gets a red mark. **Hide** removes the line and the mark.
+When you pick or drop a folder while the page still reads an older one, the page opens only the
+newest folder.
 
-Then pick the shooter in the box at the top, or click a card. The page does not pick a shooter
+Then pick the shooter in the box at the top left, or click a card. The page does not pick a shooter
 by itself, so no shots run until you pick one. Shots run from the shooter's RB battle rating
 outwards, up and down. Hover a card for the details.
 
-**Pause** next to the progress bar stops the queue: the compute workers finish the targets that they hold
+**Pause** next to the progress bar, under the shooter box, stops the queue: the compute workers finish the targets that they hold
 and take no new one. **Resume** continues from the same place. A new shooter or round starts
 its queue at once, also when the queue is paused.
 
 A click on a card or a round, or a change of **Shots**, first asks in a small bar over the
-trees when it would stop a queue that has work left (running or paused): **Run** (or Enter)
+trees when it would stop a queue that has work left (running or paused). When the settings are
+open, the bar stands in the settings under **Shots**: **Run** (or Enter)
 starts the new queue, **Cancel** (or Escape) keeps the old one and puts **Shots** back. The
 results of the stopped queue stay kept (see [Kept results](#kept-results)). The page does not
 ask when no queue runs, when the queue is done or stopped, when the kept results hold all
@@ -130,18 +132,77 @@ Then, while there are more than 40 runs or they take more than about 100 MB, it 
 run that it used least recently. A full queue takes about 1.2 MB with one round, and up to
 about 11 MB with 11 rounds.
 
-The panel at the top right shows the shooter's guns and each round that the simulation fires:
-type, calibre (mm), mass (kg), muzzle speed (m/s), flat penetration at 500 m (mm) and filler
-(g and explosive). Each gun's rounds are in tables of at most four rows, side by side, so that
-the header stays low. No text is cut: names wrap, and when the tables need more than about one
-line, the list scrolls. Below a window width of 1300 px the shooter box goes under the brand and the panel takes the
-right side; below 1000 px the panel goes under the shooter box.
-A long shooter name makes the box wider. The **best** column
+The header has two parts. At the left are the brand, the cog, the shooter box, the shooter's
+role and BR, and the progress bar. At the right is the panel of rounds. The panel shows the
+shooter's guns and each round that the simulation fires: type, calibre (mm), mass (kg), muzzle
+speed (m/s), flat penetration at 500 m (mm) and filler (g and explosive). Each gun's rounds are
+in tables side by side. No text is cut and no round is hidden: names wrap, and the panel has no
+scroll bar. For each shooter and window width, the page tries tables of 3 rows up to the most
+rounds of one gun, with the panel at the right and with the panel under the shooter box. It
+keeps the layout that gives the lowest header. Below a window width of 1000 px the panel is
+always under the shooter box. A long shooter name makes the box wider. The **best** column
 counts the targets on which each round gave the best score (also on kept results). When you hover a card, the panel
 marks the round that the card shows. Click a round to fire only that round. Click it again to
 fire the best of all rounds.
 
-**Shots** in the bar under the header sets the number of shot lines that each round fires at
+### Views of the trees
+
+The line under the header holds the view of the trees and the nation chips. The view has four
+modes: **Vertical**, **Horizontal**, **Compact** and **One nation**. The chip of the shooter's
+nation has a yellow ring in each mode. The page keeps the mode and the nation in `localStorage`.
+The name of **Vertical** was **All trees** before. A kept mode of `all` gives **Vertical**.
+
+**Vertical** shows the shown nations side by side, with the low ranks at the top. A nation chip
+shows or hides that nation.
+
+**Horizontal** turns each nation tree on its side, as the game tree. The nations are bands, one
+under the other. In a band, each research line is a row, and the premium rows follow under a
+dashed line. The ranks go up from left to right, and a line separates each two ranks. The wheel
+scrolls down through the nations. Shift and the wheel, the scrollbar at the bottom of the window,
+or a drag with the left mouse button scroll sideways. A drag that starts on a card does not shoot
+with that card. A rank ruler stays at the top, and the nation names stay at the left. A nation
+chip shows or hides that nation.
+
+All bands use the same rank columns. A rank column is as wide as the widest nation needs at that
+rank, so the ranks line up in all bands. In a rank, the rows of the game tree are the x order.
+The cards of a folder stand side by side. An x place is as wide as the largest folder at that
+place in the nation. With the game data of 2026-11 (10 nations, 1254 cards, 8 ranks), the page
+is 6040 px wide and 3194 px high. A rank column is 572 to 860 px wide.
+
+When you pick a shooter, and when you change to this mode, the view scrolls sideways to the rank
+column of the shooter. The ruler marks that rank in yellow. When the column is wider than the
+view, the shooter's card goes to the middle of the view, but the view stays in the column. When
+the shooter's nation is hidden, the start of the column comes to the left. The vertical position
+does not change. The view does not scroll by itself again until the next shooter, so a new
+result does not move it. With no shooter, the view starts at the left. With
+`prefers-reduced-motion: reduce` the view jumps with no motion.
+
+**Compact** is the **Vertical** view with each vehicle as a small square tile: the centre of its picture
+in the result colour, and the front, side and rear bars in the bottom 4 px. A nation chip shows
+or hides that nation. The page sets the tile size so that all shown nations fit the window
+width, at most 70 px (the picture height and the bars). The tile size shows at the end of the
+line. The trees scroll down. The picture keeps its natural size up to 1.25 times the tile
+width. For a smaller tile the page scales the picture down to 1.25 times the tile width, so a
+tile always shows at least 80 % of the picture width. Below 8 px the page keeps 8 px tiles and
+scrolls sideways. Before this mode, Compact was a toggle of its own. A kept Compact toggle with
+the view of all trees gives the Compact mode.
+
+**One nation** shows the tree of one nation, as in **Vertical**, in the middle of the window.
+A change to this mode shows the first nation. A nation chip shows its nation. The free space at
+the left and at the right of the tree shows an arrow and the name of the previous or the next
+nation. Click it to change the nation. The wheel over this space scrolls the tree. When this
+space is less than 56 px wide, two small arrow buttons after the mode selector do the same. The left and right arrow keys also change the nation. The arrow keys do nothing while the
+settings are open, while the page asks a question, or while a text box or a list has the focus.
+The new tree slides in from the side of its chip or its arrow. With
+`prefers-reduced-motion: reduce` the tree changes with no motion.
+
+### Settings
+
+The cog to the left of the shooter box opens the settings. Escape, **Close** or a click outside
+the settings closes them. The settings hold **Shots**, **Workers**, the colours of the results and
+the game folder. The page keeps each setting as below.
+
+**Shots** sets the number of shot lines that each round fires at
 each target: 40, 80, 160, 384 or 768. The default is 160. More lines give a finer result and
 take longer (see [What the simulation does](#what-the-simulation-does) and [Speed](#speed)).
 The page keeps the choice in `localStorage`. A change starts the queue of the shooter again
@@ -149,7 +210,7 @@ with the new count, also when the queue is paused. The results of the old count 
 store (see [Kept results](#kept-results)). The forced round stays. A new shooter or a new open
 keeps the count.
 
-**Workers** in the bar under the header sets the number of compute workers (Web Workers) that
+**Workers** sets the number of compute workers (Web Workers) that
 run the shots. One more worker, the manager, reads the game files and runs the queue (see
 [Workers](#workers)). The default is half of the CPU threads, at most 8. The page keeps the
 choice in `localStorage`. A change takes effect at once. A removed worker stops at once, and
@@ -163,24 +224,8 @@ the queue stopped. A change of **Workers** starts new ones.
 When the manager fails, the page shows the error and the queue stops. The next open starts a
 new manager. When an open fails, the manager keeps the data that it had, and its queue goes on.
 
-**Compact** in the bar under the header shows each vehicle as a small square tile: the centre
-of its picture in the result colour, and the front, side and rear bars in the bottom 4 px. The
-page sets the tile size so that all shown nations fit the window width, at most 70 px (the
-picture height and the bars). The trees scroll down. The picture keeps its natural size up to
-1.25 times the tile width. For a smaller tile the page scales the picture down to 1.25 times
-the tile width, so a tile always shows at least 80 % of the picture width. Below 8 px the page
-keeps 8 px tiles and scrolls sideways. The page keeps the choice in `localStorage`.
-
-**All** and **One nation** in the bar under the header set the view of the trees. **All** shows
-the shown nations side by side; a nation chip shows or hides that nation. **One nation** shows
-one tree in the middle of the window; a nation chip, or the left and right arrow keys, change
-the nation, and the new tree slides in from the side of its chip. With
-`prefers-reduced-motion: reduce` the tree changes with no motion. **Compact** works in both
-views; with one nation the tiles are larger (at most 70 px). The page keeps the view and the
-nation in `localStorage`.
-
-URL parameters: `view` (`nation` for the one-nation view) and `nation` (the nation of that
-view), `nations` (comma list), `speed` (targets that a compute worker holds at once:
+URL parameters: `view` (`horizontal`, `compact` or `nation`; no `view` or `all` is **Vertical**) and `nation` (the
+nation of the one-nation view; a link or a reload keeps it), `nations` (comma list), `speed` (targets that a compute worker holds at once:
 one runs and the others wait; 1 to 8, default 2; the manager uses 2 for other values) and
 `hover` (unit id to pin a tooltip once the queue is done; the one-nation view changes to the
 nation of that unit).
