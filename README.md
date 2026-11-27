@@ -411,8 +411,8 @@ Approximated, and why:
 ## Follow-up shots
 
 After the first shot on each line, the simulation fires more shots. These shots do not change
-the outcomes, the scores or the colours. The hover and the pinned details show their counts
-in each view. `shotsim` prints them in `follow` of each view, and the round's schedule in
+the outcomes, the scores, the card colour or the choice of the best round. The gain bar on each
+card and the hover and pinned details show their effect (see "Colours"). `shotsim` prints them in `follow` of each view, and the round's schedule in
 `followUps`, `followSec` and `thirdSec`.
 
 The shooter's schedule comes from the weapon of the round. Each barrel fires at its
@@ -462,9 +462,35 @@ The pairs cost the most at many lines: a direction with n lines gives up to n(n-
 85 follow-ups of the ZSU-23-4 stop at the kill, so the cost does not grow as much as the
 follow-ups. The simulation sets no cap on the follow-ups.
 
-The details show these counts under the plates of each view. They show the third shot only for
-a round with follow-ups. A dead drive stops only the aim, so a gun that already points at the
-shooter can still fire. The simulation does not model this limit.
+The details show the third shot only for a round with follow-ups. A dead drive stops only the
+aim, so a gun that already points at the shooter can still fire. The simulation does not model
+this limit.
+
+## Colours
+
+The card colour is the first-shot score s of the card: `hsl(s x 125, 58 %, 30 %)`, from red at 0
+to green at 1. The three strips at the bottom are the scores of front, side and rear.
+
+The gain bar over the strips shows the card score on a scale of 0 to 100 %. The white tick is
+the first-shot score. The solid run is the gain from the follow-ups. The dotted run is the gain
+from the pairs. A guided round fires no extra shots, so its cards have no bar. The settings show
+the legend. For each view, with k kills, p pens and core breaks, n lines, g gated lines, f
+follow-up kills and r = pair kills / pairs:
+
+- first shot: `(k + 0.4p) / n`, the score as before
+- with the follow-ups: `(k + f + 0.4(p - f)) / n`, so each follow-up kill turns a pen into a kill
+- with the pairs too: the line above plus `0.6 r (g - f) / n`
+
+A pair starts on a gated line, so r applies only to the gated lines that the follow-ups did not
+kill. All three stay in 0 to 1, and each gain is 0 or more: f is at most g, and g is at most p.
+The card score of each is front 0.5, side 0.3, rear 0.2, as for the first shot.
+
+The details show a table with one column per view. Its rows are the scores above, the count of
+each outcome, the lines, the extra shots and the plates. "Follow-up" is follow-up kills / gated
+lines, with the mean shots and time to the kill. "Pair kill" is pair kills / pairs. "Gun out" is
+the lines after which the target cannot fire back. Under it are the lines with a third shot in
+time and the kills in three shots. Each plate shows the first armour met, the mean thickness in
+mm and the shots (x N). The footer gives the three card scores, the shots and the time.
 
 ## Workers
 

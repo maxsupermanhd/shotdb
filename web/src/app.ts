@@ -2,11 +2,12 @@
 // The manager worker (manager.wasm) reads the game files and runs the queue. It hands the targets to a pool of compute
 // workers (compute.wasm) over MessagePorts. The page only draws and passes the user's actions to the manager.
 import * as store from "./store";
-import type { Card, Choice, ComputeFatal, Follow, FromManager, GameInfo, Grid, Outcome, Plate, Progress, Rounds, Shell, SimResult, Source, TargetResult, ToManager, Tree, Unit } from "./types";
+import type { Card, Choice, ComputeFatal, Follow, FromManager, GameInfo, Grid, Outcome, Plate, Progress, Rounds, Shell, SimResult, Source, TargetResult, ToManager, Tree, Unit, View } from "./types";
 
 const RANKS = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"];
 const OUTCOMES: Outcome[] = ["kill", "pen", "shatter", "ricochet", "nonpen"];
-const OUTCOME_LABEL: Record<Outcome, string> = { kill: "Pen + kill", pen: "Pen, no kill", shatter: "Pen, core broke", ricochet: "Ricochet", nonpen: "No pen" };
+const OUTCOME_LABEL: Record<Outcome, string> = { kill: "Kill", pen: "Pen", shatter: "Core broke", ricochet: "Ricochet", nonpen: "No pen" };
+const VIEW_WEIGHT = [0.5, 0.3, 0.2]; // front, side, rear, as sim.Views
 const TILE_MIN = 8, TILE_MAX = 70; // TILE_MAX: the height of the unit pictures and the view bars
 
 const params = new URLSearchParams(location.search);
@@ -248,16 +249,19 @@ function setupTrees() {
     const id = card?.dataset.id;
     if (id && shootable(id)) choose({ shooter: id, round: id === state.shooter ? state.round : -1, lines: lines() }, `Shoot with ${name(id)}?`);
   });
+  // The scroll to the pinned card makes the browser send mouse events without a move. Only a real move ends the pin.
+  const isPinned = () => tip.classList.contains("pinned");
+  addEventListener("pointermove", (e) => {
+    if (e.movementX || e.movementY) tip.classList.remove("pinned");
+  }, { passive: true });
   main.addEventListener("mouseover", (e) => {
     const card = (e.target as Element).closest<HTMLElement>("[data-id]");
-    if (card) showTooltip(card);
+    if (card && !isPinned()) showTooltip(card);
   });
-  main.addEventListener("mouseleave", hideTip);
-  main.parentElement!.addEventListener("scroll", () => {
-    if (!tip.classList.contains("pinned")) hideTip();
-  }, { passive: true });
+  main.addEventListener("mouseleave", () => isPinned() || hideTip());
+  main.parentElement!.addEventListener("scroll", () => isPinned() || hideTip(), { passive: true });
   main.addEventListener("mouseout", (e) => {
-    if (!(e.relatedTarget instanceof Element && e.relatedTarget.closest("[data-id]"))) hideTip();
+    if (!isPinned() && !(e.relatedTarget instanceof Element && e.relatedTarget.closest("[data-id]"))) hideTip();
   });
   $("#rounds").addEventListener("click", (e) => {
     const row = (e.target as Element).closest<HTMLElement>(".round");
@@ -434,7 +438,7 @@ function card(cell: Card) {
   el.className = `card${cell.prem ? " prem" : ""}${cell.squad ? " squad" : ""}`;
   el.dataset.id = cell.id;
   el.innerHTML = `<span class="card-name">${esc(name(cell.id))}</span><span class="card-br"></span>`
-    + `<span class="card-views"><i></i><i></i><i></i></span>`;
+    + `<span class="card-views"><i></i><i></i><i></i></span><span class="card-gain" hidden><i class="run"></i><i class="dots"></i><i class="tick"></i></span>`;
   el.classList.toggle("nodata", !state.game.has(cell.id));
   el.querySelector(".card-br")!.textContent = shootable(cell.id) ? br(cell.id).toFixed(1) : "no BR";
   track(cell.id, el);
@@ -1072,6 +1076,7 @@ function newQueue(q: Extract<FromManager, { op: "queue" }>) {
       el.classList.remove("running", "done", "void");
       el.style.removeProperty("--bg");
       el.querySelectorAll<HTMLElement>(".card-views i").forEach((i) => i.style.removeProperty("background"));
+      el.querySelector<HTMLElement>(".card-gain")!.hidden = true;
     });
   }
   document.querySelectorAll(".card.shooter").forEach((el) => el.classList.remove("shooter"));
@@ -1263,6 +1268,14 @@ function paint(id: string) {
     }
     el.style.setProperty("--bg", color(res.score));
     el.querySelectorAll<HTMLElement>(".card-views i").forEach((i, v) => (i.style.background = color(res.views[v]?.score ?? 0, 46)));
+    const bar = el.querySelector<HTMLElement>(".card-gain")!;
+    bar.hidden = !res.shell.followUps;
+    if (bar.hidden) continue;
+    const [first, follow, pairs] = cardGains(res.views).map((g) => g * 100);
+    const [run, dots, tick] = bar.children as HTMLCollectionOf<HTMLElement>;
+    run.style.cssText = `left:${first}%;width:${follow - first}%;background:${color(follow / 100, 60)}`;
+    dots.style.cssText = `left:${follow}%;width:${pairs - follow}%;color:${color(pairs / 100, 62)}`;
+    tick.style.left = `${first}%`;
   }
 }
 
@@ -1277,22 +1290,82 @@ function shellType(t: string) {
 }
 
 function plateText(p: Plate) {
-  return `${esc(p.name.replaceAll("_", " "))} ${Math.round(p.mm)} mm <span class="muted">(${p.shots})</span>`;
+  return `${esc(p.name.replaceAll("_", " "))} <b>${Math.round(p.mm)}</b><span class="of">×${p.shots}</span>`;
 }
 
-function followText(f: Follow | undefined, sh: Shell) {
-  if (!f) return "";
-  const out = [];
-  if (f.lines) {
-    const k = f.kills ?? 0;
-    out.push(`Follow-ups kill ${k} of ${f.lines} crew hits${k ? ` <span class="muted">(mean ${(f.shots! / k).toFixed(1)} shots, ${(f.seconds! / k).toFixed(2)} s)</span>` : ""}`);
+// The score of view v: of the first shot (as the simulation gives it), with the follow-up kills, and with the pair kills
+// too. See README.md, "Colours".
+function gains(v: View) {
+  const n = OUTCOMES.reduce((a, o) => a + (v.counts[o] ?? 0), 0);
+  const f: Follow = v.follow ?? {};
+  const kills = f.kills ?? 0;
+  const pairs = f.pairs ? (f.pairKills ?? 0) / f.pairs * ((f.lines ?? 0) - kills) : 0;
+  return n ? [v.score, v.score + 0.6 * kills / n, v.score + 0.6 * (kills + pairs) / n] : [v.score, v.score, v.score];
+}
+
+// The card score of each of the three gains.
+function cardGains(views: View[]) {
+  const out = [0, 0, 0];
+  views.forEach((v, i) => gains(v).forEach((g, k) => (out[k] += VIEW_WEIGHT[i] * g)));
+  return out;
+}
+
+function frac(a = 0, b = 0) {
+  if (!b) return `<span class="z">–</span>`;
+  return `<span${a ? "" : ` class="z"`}>${a}<span class="of">/${b}</span></span>`;
+}
+
+function num(n = 0) {
+  return n ? String(n) : `<span class="z">·</span>`;
+}
+
+const pct = (s: number) => `${Math.round(s * 100)}%`;
+
+function resultBody(res: SimResult, sh: Shell, kept: boolean) {
+  const n = state.rounds?.rounds.length ?? 0;
+  const guided = !sh.followUps;
+  const views = res.views;
+  const fl = views.map((v): Follow => v.follow ?? {});
+  const row = (label: string, cell: (i: number) => string, cls = "") =>
+    `<tr${cls ? ` class="${cls}"` : ""}><td>${label}</td>${views.map((_, i) => `<td>${cell(i)}</td>`).join("")}</tr>`;
+  const any = (k: keyof Follow) => fl.some((f) => f[k]);
+  const g = views.map(gains);
+  let rows = `<tr><th></th>${views.map((v) => `<th>${v.name}</th>`).join("")}</tr>`
+    + `<tr class="tt-bars"><td></td>${views.map((v) => `<td><span class="tt-bar">${OUTCOMES.map((o) => v.counts[o] ? `<i class="o-${o}" style="flex:${v.counts[o]}"></i>` : "").join("")}</span></td>`).join("")}</tr>`
+    + row("First shot", (i) => `<i class="mk"><i class="tick"></i></i>${pct(g[i][0])}`, "tt-first");
+  if (!guided) {
+    rows += row("+ follow-ups", (i) => `<i class="mk"><i class="run"></i></i>${pct(g[i][1])}`)
+      + row("+ pairs", (i) => `<i class="mk"><i class="dots"></i></i>${pct(g[i][2])}`);
   }
-  if (f.pairs) out.push(`two lines kill in ${f.pairKills ?? 0} of ${f.pairs} pairs`);
-  if (f.silenced) {
-    out.push(`no return fire after ${f.silenced}`
-      + (sh.followUps ? `: third shot at ${sh.thirdSec} s on ${f.third ?? 0}, kill in 3 shots on ${f.thirdKills ?? 0}` : ""));
+  for (const o of OUTCOMES) {
+    if (views.some((v) => v.counts[o])) rows += row(`<i class="sw o-${o}"></i>${OUTCOME_LABEL[o]}`, (i) => num(views[i].counts[o]));
   }
-  return out.length ? `<div class="tt-follow">${out.join(" · ")}</div>` : "";
+  rows += row("Lines", (i) => String(OUTCOMES.reduce((a, o) => a + (views[i].counts[o] ?? 0), 0)), "tt-total");
+  if (!guided || any("silenced")) {
+    rows += `<tr class="tt-sec"><td colspan="${views.length + 1}">Extra shots <span class="muted">${guided ? "none: guided" : `${sh.followUps} in ${sh.followSec} s`}</span></td></tr>`;
+  }
+  if (any("lines")) {
+    const mean = (i: number, k: "shots" | "seconds", d: number) => fl[i].kills ? (fl[i][k]! / fl[i].kills!).toFixed(d) : `<span class="z">–</span>`;
+    rows += row("Follow-up", (i) => frac(fl[i].kills, fl[i].lines))
+      + row(`<span class="ind">shots to kill</span>`, (i) => mean(i, "shots", 1))
+      + row(`<span class="ind">time to kill</span>`, (i) => mean(i, "seconds", 2));
+  }
+  if (any("pairs")) rows += row("Pair kill", (i) => frac(fl[i].pairKills, fl[i].pairs));
+  if (any("silenced")) {
+    rows += row(`<span class="warn">Gun out</span>`, (i) => num(fl[i].silenced));
+    if (!guided) {
+      rows += row(`<span class="ind">3rd shot ${sh.thirdSec} s</span>`, (i) => frac(fl[i].third, fl[i].silenced))
+        + row(`<span class="ind">kill in 3</span>`, (i) => frac(fl[i].thirdKills, fl[i].third));
+    }
+  }
+  const c = cardGains(views);
+  return `<div class="tt-shot">${esc(sh.name)} <span class="muted">${shellType(sh.type)}</span> <b>${sh.pen}</b><span class="muted"> mm at ${state.rounds?.range ?? 500} m</span></div>`
+    + `<div class="tt-meta">${esc(sh.gun)} · ${state.round >= 0 ? "only this round" : `best of ${n}`} · ${state.lines} lines${guided ? " · guided" : ` · ${sh.followUps} follow-up${sh.followUps === 1 ? "" : "s"} in ${sh.followSec} s`}</div>`
+    + `<table class="tt-t">${rows}</table>`
+    + `<div class="tt-sec">Plates</div>`
+    + views.map((v) => `<div class="tt-pl"><span>${v.name}</span><span>${v.plates.slice(0, 2).map(plateText).join(" · ")}</span></div>`).join("")
+    + `<div class="tt-foot"><span>Lethality <b>${pct(res.score)}</b>${guided ? "" : ` <span class="muted">→ ${pct(c[1])} → ${pct(c[2])}</span>`}</span>`
+    + `<span class="muted">${res.shots}${res.extra ? ` + ${res.extra}` : ""} shots · ${kept ? "kept" : `${Math.round(res.ms)} ms`}</span></div>`;
 }
 
 function showTooltip(el: HTMLElement, pinned = false) {
@@ -1316,26 +1389,14 @@ function showTooltip(el: HTMLElement, pinned = false) {
   } else if (!res.shell) {
     body = `<div class="tt-pending">The shooter has no gun of 20 mm or more that attacks armour</div>`;
   } else {
-    const n = state.rounds?.rounds.length ?? 0;
-    body = `<div class="tt-shell">${esc(res.shell.name)} <span class="muted">${shellType(res.shell.type)} · ${res.shell.pen} mm flat at ${state.rounds?.range ?? 500} m</span></div>`
-      + `<div class="tt-sub">${esc(res.shell.gun)} · ${state.round >= 0 ? "the only round fired" : `best of ${n} round${n === 1 ? "" : "s"}`} · ${state.lines} lines a round${res.shell.followUps ? ` · ${res.shell.followUps} follow-up${res.shell.followUps === 1 ? "" : "s"} by ${res.shell.followSec} s` : " · no follow-ups"}</div>`
-      + res.views.map((v) => {
-        const total = OUTCOMES.reduce((a, o) => a + (v.counts[o] ?? 0), 0);
-        const bar = OUTCOMES.map((o) => v.counts[o] ? `<i class="o-${o}" style="flex:${v.counts[o]}"></i>` : "").join("");
-        const parts = OUTCOMES.filter((o) => v.counts[o]).map((o) => `<span class="c-${o}">${v.counts[o]} ${OUTCOME_LABEL[o].toLowerCase()}</span>`).join(", ");
-        return `<div class="tt-view"><span class="tt-vname">${v.name}</span><span class="tt-bar">${bar}</span></div>`
-          + `<div class="tt-parts">${parts} <span class="muted">of ${total}</span></div>`
-          + `<div class="tt-plates">${v.plates.map(plateText).join(" · ")}</div>`
-          + followText(v.follow, res.shell!);
-      }).join("")
-      + `<div class="tt-score">Lethality <b>${Math.round(res.score * 100)}%</b> <span class="muted">(${res.shots} shots on the collision model${res.extra ? ` and ${res.extra} follow-up and pair shots` : ""}, ${state.kept.has(id) ? "kept from an earlier run" : `${res.ms} ms`}; plates: first armour met, mean thickness, shots)</span></div>`;
+    body = resultBody(res, res.shell, state.kept.has(id));
   }
   const sbr = br(state.shooter);
   const d = shootable(id) && state.shooter ? br(id) - sbr : 0;
   const diff = state.shooter ? ` <span class="${d > 0 ? "up" : d < 0 ? "down" : ""}">(${d >= 0 ? "+" : ""}${d.toFixed(1)})</span>` : "";
-  tip.innerHTML = `<div class="tt-title">${esc(name(id))}</div>`
-    + `<div class="tt-sub">${u ? `${esc(nation(u.country))} · ${esc(u.role)}${u.rank ? ` · Rank ${RANKS[u.rank - 1]}` : ""}` : ""}${shootable(id) ? ` · BR ${br(id).toFixed(1)}${diff}` : ""}</div>`
-    + (state.shooter ? `<div class="tt-shooter">shot by ${esc(name(state.shooter))}${id === state.shooter ? " (itself)" : ""}</div>` : "")
+  tip.innerHTML = `<div class="tt-head"><span class="tt-title">${esc(name(id))}</span>${shootable(id) ? `<span class="tt-br">BR ${br(id).toFixed(1)}${diff}</span>` : ""}</div>`
+    + `<div class="tt-sub">${u ? `${esc(nation(u.country))} · ${esc(u.role)}${u.rank ? ` · Rank ${RANKS[u.rank - 1]}` : ""}` : ""}</div>`
+    + (state.shooter ? `<div class="tt-shooter">${esc(name(state.shooter))}${id === state.shooter ? " (itself)" : ""}</div>` : "")
     + body;
   tip.hidden = false;
   highlightRound(res && !("error" in res) && res.shell ? res.shell.index : -1);
