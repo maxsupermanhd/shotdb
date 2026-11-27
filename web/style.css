@@ -131,6 +131,13 @@ body {
 }
 .chip.on { color: var(--text); background: var(--panel); border-color: #4a5462; }
 
+/* All | One nation: one control of two halves */
+.view-ctl { display: flex; }
+.view-ctl .chip:first-child { border-radius: 12px 0 0 12px; }
+.view-ctl .chip:last-child { border-radius: 0 12px 12px 0; margin-left: -1px; }
+/* one nation: the tree stands in the middle of the view */
+.one-nation .trees-grid { margin: 0 auto; }
+
 .progress { display: flex; align-items: center; gap: 8px; flex: 1 1 320px; min-width: 0; }
 .progress-track { flex: 1 1 60px; max-width: 320px; height: 6px; background: var(--pending); border-radius: 3px; overflow: hidden; }
 .progress-fill { height: 100%; width: 0; background: var(--accent); }

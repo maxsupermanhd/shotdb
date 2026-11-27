@@ -171,9 +171,19 @@ picture height and the bars). The trees scroll down. The picture keeps its natur
 the tile width, so a tile always shows at least 80 % of the picture width. Below 8 px the page
 keeps 8 px tiles and scrolls sideways. The page keeps the choice in `localStorage`.
 
-URL parameters: `nations` (comma list), `speed` (targets that a compute worker holds at once:
+**All** and **One nation** in the bar under the header set the view of the trees. **All** shows
+the shown nations side by side; a nation chip shows or hides that nation. **One nation** shows
+one tree in the middle of the window; a nation chip, or the left and right arrow keys, change
+the nation, and the new tree slides in from the side of its chip. With
+`prefers-reduced-motion: reduce` the tree changes with no motion. **Compact** works in both
+views; with one nation the tiles are larger (at most 70 px). The page keeps the view and the
+nation in `localStorage`.
+
+URL parameters: `view` (`nation` for the one-nation view) and `nation` (the nation of that
+view), `nations` (comma list), `speed` (targets that a compute worker holds at once:
 one runs and the others wait; 1 to 8, default 2; the manager uses 2 for other values) and
-`hover` (unit id to pin a tooltip once the queue is done).
+`hover` (unit id to pin a tooltip once the queue is done; the one-nation view changes to the
+nation of that unit).
 
 ### Command line
 

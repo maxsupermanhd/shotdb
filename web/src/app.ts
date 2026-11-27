@@ -14,6 +14,9 @@ const nationsParam = params.get("nations");
 const state = {
   shooter: "", // none until the user picks one
   nations: nationsParam ? new Set(nationsParam.split(",")) : null as Set<string> | null, // null: all
+  // "all": the shown trees side by side; "nation": one tree, the nation chips change it
+  view: (params.get("view") ?? localStorage.getItem("shotdb.view")) === "nation" ? "nation" : "all",
+  nation: params.get("nation") ?? localStorage.getItem("shotdb.nation") ?? "",
   game: new Map<string, Unit>(), // from the opened game data
   results: new Map<string, TargetResult>(),
   kept: new Set<string>(), // the results that came from the store
@@ -75,6 +78,7 @@ const icons = new IntersectionObserver((entries) => {
 setupTrees();
 setupLines();
 setupCompact();
+setupView();
 setupPicker();
 setupConfirm();
 setupOpen();
@@ -271,6 +275,7 @@ function render() {
     chip.textContent = tree.name;
     chip.dataset.country = tree.country;
     chip.addEventListener("click", () => {
+      if (state.view === "nation") return showNation(tree.country);
       state.nations ??= new Set(trees.map((t) => t.country));
       state.nations.has(tree.country) ? state.nations.delete(tree.country) : state.nations.add(tree.country);
       applyNations();
@@ -348,18 +353,65 @@ function track(id: string, el: HTMLElement) {
 }
 
 function applyNations() {
+  const one = state.view === "nation";
+  if (one && trees.length && !trees.some((t) => t.country === state.nation)) state.nation = trees[0].country;
+  document.body.classList.toggle("one-nation", one);
+  $("#view-all").classList.toggle("on", !one);
+  $("#view-nation").classList.toggle("on", one);
   let col = 0;
   for (const tree of trees) {
-    const on = !state.nations || state.nations.has(tree.country);
+    const on = one ? tree.country === state.nation : !state.nations || state.nations.has(tree.country);
     if (on) col++;
     document.querySelectorAll<HTMLElement>(`.n-${tree.country}`).forEach((el) => {
       el.hidden = !on;
       el.style.gridColumn = String(col);
     });
-    document.querySelector(`.chip[data-country="${tree.country}"]`)!.classList.toggle("on", on);
+    const chip = document.querySelector<HTMLElement>(`.chip[data-country="${tree.country}"]`)!;
+    chip.classList.toggle("on", on);
+    chip.setAttribute("aria-pressed", String(on));
   }
   syncUrl();
   fitCompact();
+}
+
+const still = matchMedia("(prefers-reduced-motion: reduce)");
+
+// Shows the tree of country in the nation view. The new tree slides in from the side of its chip,
+// unless the user asks for reduced motion.
+function showNation(country: string, slide = true) {
+  const from = trees.findIndex((t) => t.country === state.nation);
+  const to = trees.findIndex((t) => t.country === country);
+  if (to < 0 || country === state.nation) return;
+  state.nation = country;
+  localStorage.setItem("shotdb.nation", country);
+  applyNations();
+  const view = $("#trees").parentElement!;
+  view.scrollTo({ left: 0, top: 0 });
+  if (slide && !still.matches) {
+    $("#trees").animate([{ transform: `translateX(${to > from ? 64 : -64}px)`, opacity: 0 }, { transform: "none", opacity: 1 }],
+      { duration: 220, easing: "cubic-bezier(.2, .7, .3, 1)" });
+  }
+}
+
+// All the shown trees side by side, or one nation at a time; the left and right arrow keys change the nation.
+function setupView() {
+  const set = (view: "all" | "nation") => {
+    state.view = view;
+    localStorage.setItem("shotdb.view", view);
+    if (trees.length) applyNations();
+  };
+  $("#view-all").addEventListener("click", () => set("all"));
+  $("#view-nation").addEventListener("click", () => set("nation"));
+  $("#view-all").classList.toggle("on", state.view === "all");
+  $("#view-nation").classList.toggle("on", state.view === "nation");
+  addEventListener("keydown", (e) => {
+    if (state.view !== "nation" || !trees.length || asking || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || e.target instanceof HTMLTextAreaElement) return;
+    e.preventDefault();
+    const i = trees.findIndex((t) => t.country === state.nation);
+    showNation(trees[(i + (e.key === "ArrowRight" ? 1 : trees.length - 1)) % trees.length].country);
+  });
 }
 
 
@@ -852,6 +904,8 @@ function pinHover() {
   const pin = params.get("hover");
   const els = pin ? cards.get(pin) : undefined;
   if (!els) return;
+  const u = state.game.get(pin!);
+  if (state.view === "nation" && u) showNation(u.country, false);
   els[0].scrollIntoView({ block: "center", inline: "center" });
   showTooltip(els[0], true);
 }
@@ -1024,6 +1078,13 @@ function syncUrl() {
   p.delete("shooter"); // from older links: the page does not pick a shooter by itself
   p.delete("mode");
   !state.nations || state.nations.size === trees.length ? p.delete("nations") : p.set("nations", [...state.nations].join(","));
+  if (state.view === "nation") {
+    p.set("view", "nation");
+    p.set("nation", state.nation);
+  } else {
+    p.delete("view");
+    p.delete("nation");
+  }
   history.replaceState(null, "", `?${p}`);
 }
 
