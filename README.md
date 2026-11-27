@@ -403,7 +403,10 @@ Approximated, and why:
 - **Outcome per line**: kill when the vehicle dies; "pen, core broke" when a module inside
   took damage and the core broke; "pen, no kill" when a module inside took damage;
   "ricochet" when the shell bounced and did nothing inside; else "no pen". Score per view:
-  `(kills + 0.4 x (pens + shatters)) / lines`; card score: front 0.5, side 0.3, rear 0.2.
+  `(kills + 0.4 x (pens + core breaks)) / lines`; card score: front 0.5, side 0.3, rear 0.2.
+  The result key of "pen, core broke" is `shatter`. It is a core that perforated a plate and
+  then broke up, not the game's "shell shattered" message on a shell that did not penetrate.
+  Such a shell counts as "no pen" or "ricochet".
 
 ## Follow-up shots
 
@@ -419,7 +422,7 @@ is full at the first shot. The follow-ups are the shots in the 1.5 s after the f
 at least one: the M4A2 fires one at 5 s, the M42 fires 6, the ZSU-23-4 fires 85. A guided
 round fires no follow-ups, no pairs and no third shot.
 
-1. **Follow-ups.** A first shot that penetrates (pen or shatter), damages crew (hp lost) and
+1. **Follow-ups.** A first shot that penetrates ("pen, no kill" or "pen, core broke"), damages crew (hp lost) and
    does not kill passes the gate. The follow-ups go along the same line, each with its own
    seed, on the damage state that the shots before left: hp of each part and the dead parts.
    The armour does not change, and a fire that does not kill does nothing. The chain stops at
