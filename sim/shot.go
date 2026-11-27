@@ -50,6 +50,8 @@ type shot struct {
 	msgs     []message
 	broke    bool // the core broke up
 	ricochet bool
+	through  bool // the shell body or jet went through a plate
+	outside  bool // Options.Outside
 	// First armour plate met, and its charge, for the summary.
 	first       int32
 	firstCharge float64
@@ -230,6 +232,7 @@ func (s *shot) kinetic(o, d vec, spans []span, pen, speed float64, bounces int) 
 			return
 		}
 		residual := pen - cost
+		s.through = s.through || !p.Module
 		if sh.ExplMass > 0 && math.IsInf(armed, 1) && cost > sh.ExplThresh {
 			armed = sp.in
 		}
@@ -363,6 +366,7 @@ func (s *shot) jet(o, d vec, spans []span, start float64) {
 			return
 		}
 		pen -= cost
+		s.through = s.through || !p.Module
 		if p.Spall && sh.JetSpall != "" && pen > 0 {
 			s.cone(sh.JetSpall, o, d, sp, pen, cost)
 		}

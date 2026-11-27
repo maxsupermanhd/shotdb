@@ -2,7 +2,7 @@
 // The manager worker (manager.wasm) reads the game files and runs the queue. It hands the targets to a pool of compute
 // workers (compute.wasm) over MessagePorts. The page only draws and passes the user's actions to the manager.
 import * as store from "./store";
-import type { Card, Choice, ComputeFatal, Follow, FromManager, GameInfo, Grid, Outcome, Plate, Progress, Rounds, Shell, SimResult, Source, TargetResult, ToManager, Tree, Unit, View } from "./types";
+import type { Card, Choice, ComputeFatal, Follow, FromManager, GameInfo, Grid, Options, Outcome, Plate, Progress, Rounds, Shell, SimResult, Source, TargetResult, ToManager, Tree, Unit, View } from "./types";
 
 const RANKS = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"];
 const OUTCOMES: Outcome[] = ["kill", "pen", "shatter", "ricochet", "nonpen"];
@@ -25,6 +25,7 @@ const state = {
   rounds: null as Rounds | null, // of the shooter
   round: -1, // the only round to fire, or -1 for the best of all
   lines: 0, // shot lines a round on each target, in the shown queue
+  opts: null as Options | null, // the model of the shown queue
   queue: [] as string[], // in the manager's order
   started: new Set<string>(), // targets that a compute worker holds
   gen: 0, // the manager's queue; messages of other queues are dropped
@@ -48,6 +49,23 @@ const $ = <T extends HTMLElement = HTMLElement>(s: string) => document.querySele
 // WT font glyphs (origin and event markers) that a normal font cannot draw
 const clean = (name: string) => name.replace(/[␀-◿-]/g, "").trim();
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
+// localStorage can refuse a value, for example when it is full or turned off. The setting then holds only for this visit.
+function save(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value);
+  } catch (err) {
+    console.warn(`cannot keep ${key}: ${message(err)}`);
+  }
+}
+const MODEL_KEY = "shotdb.model"; // the model settings that differ from the defaults
+let defaults: Options | null = null; // the model of the manager, from "samples"
+function savedModel(): Partial<Options> {
+  try {
+    return JSON.parse(localStorage.getItem(MODEL_KEY) ?? "{}");
+  } catch {
+    return {};
+  }
+}
 
 let manager: Worker;
 let managerDown = false;
@@ -62,7 +80,7 @@ function startManager() {
   tell({ op: "hold", n: Number(params.get("speed") ?? 2) });
   // The choice before a failure goes to the new manager: it keeps it for the next open.
   // The manager keeps its default for a count that it does not have.
-  tell({ op: "run", shooter: state.shooter, round: state.round, lines: state.lines || Number(localStorage.getItem("shotdb.lines")) });
+  tell({ op: "run", shooter: state.shooter, round: state.round, lines: state.lines || Number(localStorage.getItem("shotdb.lines")), options: JSON.stringify(state.opts ?? savedModel()) });
 }
 startManager();
 
@@ -88,6 +106,7 @@ const icons = new IntersectionObserver((entries) => {
 }, { root: $("#trees").parentElement, rootMargin: "400px" });
 setupTrees();
 setupLines();
+setupModel();
 setupView();
 setupPicker();
 setupConfirm();
@@ -101,7 +120,7 @@ function setupWorkers() {
   const stored = Number(localStorage.getItem("shotdb.workers"));
   select.value = String(stored >= 1 && stored <= cores ? stored : Math.min(8, Math.max(1, Math.floor(cores / 2))));
   select.addEventListener("change", () => {
-    localStorage.setItem("shotdb.workers", select.value);
+    save("shotdb.workers", select.value);
     restarts = 0;
     setWorkers(Number(select.value));
   });
@@ -113,13 +132,73 @@ function setupLines() {
   const select = $<HTMLSelectElement>("#lines");
   select.addEventListener("change", () => {
     const n = Number(select.value);
-    choose({ shooter: state.shooter, round: state.round, lines: n }, `Fire ${n} lines a round?`, () => (select.value = String(state.lines)));
+    choose({ shooter: state.shooter, round: state.round, lines: n, opts: model() }, `Fire ${n} lines a round?`, () => (select.value = String(state.lines)));
   });
 }
 
+// The model settings. A change starts the queue of the shooter again, as a change of Shots does.
+function setupModel() {
+  const ask = () => {
+    const o = model();
+    if (!(o.window >= 0 && o.window <= 10) || !(o.seatChange <= 60)) return fillModel(shownModel());
+    modelState(o);
+    choose({ shooter: state.shooter, round: state.round, lines: lines(), opts: o }, "Run with the new model?", () => fillModel(shownModel()), "#model-slot");
+  };
+  $("#model").addEventListener("change", ask);
+  $("#model-reset").addEventListener("click", () => {
+    if (!defaults) return;
+    fillModel(defaults);
+    ask();
+  });
+}
+
+const modelFields = () => document.querySelectorAll<HTMLInputElement | HTMLSelectElement>("#model [data-opt]");
+const field = (k: keyof Options) => $<HTMLInputElement | HTMLSelectElement>(`#model [data-opt="${k}"]`);
+// the model of the shown queue, or before the first queue the kept one
+const shownModel = (): Options => state.opts ?? { ...defaults!, ...savedModel() };
+
+// the model in the settings, in the key order of the defaults
+function model(): Options {
+  const o: Record<string, boolean | number> = { ...(defaults ?? shownModel()) };
+  for (const el of modelFields()) {
+    const k = el.dataset.opt!;
+    if (el instanceof HTMLSelectElement) o[k] = el.value === "1";
+    else if (el.type === "checkbox") o[k] = el.checked;
+    else o[k] = el.value.trim() === "" ? (k === "seatChange" ? -1 : NaN) : Number(el.value);
+  }
+  return o as unknown as Options;
+}
+
+function fillModel(o: Options) {
+  for (const el of modelFields()) {
+    const v = o[el.dataset.opt as keyof Options];
+    if (el instanceof HTMLSelectElement) el.value = v ? "1" : "0";
+    else if (el.type === "checkbox") el.checked = v as boolean;
+    else el.value = typeof v === "number" && v >= 0 ? String(v) : "";
+  }
+  modelState(o);
+}
+
+// A setting that has no effect with the other settings is off.
+function modelState(o: Options) {
+  field("window").disabled = !o.followUps;
+  field("stock").disabled = field("lastRound").disabled = !o.followUps && !o.returnFire;
+  field("seatChange").disabled = field("override").disabled = field("drives").disabled = !o.returnFire;
+}
+
+// The legend of the gain bar shows the gains of the shown queue.
+function legend(o: Options) {
+  $("#legend-follow").hidden = !o.followUps;
+  $("#legend-pairs").hidden = !o.pairs;
+  $(".legend-gain").hidden = !o.followUps && !o.pairs;
+}
+
+// Only the settings that differ from the defaults are kept, so that a new default reaches them.
 function run(c: Choice) {
-  if (c.lines) localStorage.setItem("shotdb.lines", String(c.lines));
-  tell({ op: "run", ...c });
+  if (c.lines) save("shotdb.lines", String(c.lines));
+  const changed = Object.entries(c.opts).filter(([k, v]) => !defaults || defaults[k as keyof Options] !== v);
+  save(MODEL_KEY, JSON.stringify(Object.fromEntries(changed)));
+  tell({ op: "run", shooter: c.shooter, round: c.round, lines: c.lines, options: JSON.stringify(c.opts) });
 }
 // the count in the Shots box
 const lines = () => Number($<HTMLSelectElement>("#lines").value) || state.lines;
@@ -176,6 +255,9 @@ function onManager(msg: FromManager) {
       select.replaceChildren(...msg.lines.map((n) => new Option(String(n))));
       const stored = Number(localStorage.getItem("shotdb.lines"));
       select.value = String(msg.lines.includes(stored) ? stored : msg.default);
+      defaults = msg.options;
+      fillModel(shownModel());
+      legend(shownModel());
       return;
     }
     case "opened":
@@ -247,7 +329,7 @@ function setupTrees() {
   main.addEventListener("click", (e) => {
     const card = (e.target as Element).closest<HTMLElement>(".card[data-id]");
     const id = card?.dataset.id;
-    if (id && shootable(id)) choose({ shooter: id, round: id === state.shooter ? state.round : -1, lines: lines() }, `Shoot with ${name(id)}?`);
+    if (id && shootable(id)) choose({ shooter: id, round: id === state.shooter ? state.round : -1, lines: lines(), opts: model() }, `Shoot with ${name(id)}?`);
   });
   // The scroll to the pinned card makes the browser send mouse events without a move. Only a real move ends the pin.
   const isPinned = () => tip.classList.contains("pinned");
@@ -269,7 +351,7 @@ function setupTrees() {
     const i = Number(row.dataset.index);
     const round = state.round === i ? -1 : i;
     const r = state.rounds!.rounds;
-    choose({ shooter: state.shooter, round, lines: lines() }, round < 0 ? `Fire the best of all ${r.length} rounds?` : `Fire only ${r[i].name}?`);
+    choose({ shooter: state.shooter, round, lines: lines(), opts: model() }, round < 0 ? `Fire the best of all ${r.length} rounds?` : `Fire only ${r[i].name}?`);
   });
   $("#pause").addEventListener("click", () => tell({ op: "pause" }));
   new ResizeObserver(() => {
@@ -516,7 +598,7 @@ function showNation(country: string, slide = true, step = 0) {
   const to = trees.findIndex((t) => t.country === country);
   if (to < 0 || country === state.nation) return;
   state.nation = country;
-  localStorage.setItem("shotdb.nation", country);
+  save("shotdb.nation", country);
   applyNations();
   const view = $("#trees").parentElement!;
   view.scrollTo({ left: 0, top: 0 });
@@ -556,7 +638,7 @@ function setupView() {
     // the horizontal view has cards of its own
     const build = (view === "horizontal") !== (state.view === "horizontal");
     state.view = view;
-    localStorage.setItem("shotdb.view", view);
+    save("shotdb.view", view);
     localStorage.removeItem("shotdb.compact");
     hideTip();
     $("#trees").parentElement!.scrollTo({ left: 0, top: 0 });
@@ -889,6 +971,7 @@ async function openSource(src: Source, label: string) {
     const summary = $("#data-summary");
     summary.textContent = `Game data: ${data.label} · ${data.info.source}${data.info.version ? ` ${data.info.version}` : ""} · ${inTree} vehicles`;
     summary.hidden = false;
+    field("seatChange").placeholder = String(+data.info.seatChange.toFixed(2));
   }
   folderMode();
   if (!info) {
@@ -950,14 +1033,16 @@ function shootable(id: string) {
 
 // The search box is a clear pick, so it runs with no question. A new shooter fires the best of all rounds.
 function selectShooter(id: string) {
-  run({ shooter: id, round: id === state.shooter ? state.round : -1, lines: lines() });
+  run({ shooter: id, round: id === state.shooter ? state.round : -1, lines: lines(), opts: model() });
 }
 
-let asking: { c: Choice; cancel?: () => void } | null = null; // the choice in the confirm bar
+// The choice in the confirm bar. In the open settings the bar stands in slot, and the focus goes back to back.
+let asking: { c: Choice; cancel?: () => void; slot: string; back: HTMLElement | null } | null = null;
 
 // Runs choice c. When the queue still has work and the store does not have all results of c, the confirm bar
 // asks first. cancel undoes the control's change when the user says no.
-async function choose(c: Choice, question: string, cancel?: () => void) {
+async function choose(c: Choice, question: string, cancel?: () => void, slot = "#confirm-slot") {
+  const back = document.activeElement instanceof HTMLElement && document.activeElement.closest("#settings") ? document.activeElement : null;
   const busy = () => state.shooter !== "" && state.progress.done < state.progress.total && !state.stopped && pool.length > 0;
   if (!busy()) return run(c);
   let have = 0;
@@ -968,7 +1053,7 @@ async function choose(c: Choice, question: string, cancel?: () => void) {
   }
   if (!busy() || have >= state.queue.length) return run(c);
   asking?.cancel?.();
-  asking = { c, cancel };
+  asking = { c, cancel, slot, back };
   const { done, total } = state.progress;
   $("#confirm-text").textContent = `${question} The queue of ${name(state.shooter)} stops at ${done} / ${total}; its results stay kept.`
     + (have ? ` ${have} of the new results are kept already.` : "");
@@ -981,7 +1066,7 @@ async function choose(c: Choice, question: string, cancel?: () => void) {
 function placeConfirm() {
   const bar = $("#confirm");
   const inside = $<HTMLDialogElement>("#settings").open;
-  (inside ? $("#confirm-slot") : document.body).append(bar);
+  (inside ? $(asking?.slot ?? "#confirm-slot") : document.body).append(bar);
   bar.classList.toggle("inline", inside);
   bar.style.top = inside ? "" : `${$("main.trees").getBoundingClientRect().top + 8}px`;
 }
@@ -990,8 +1075,8 @@ function answer(yes: boolean) {
   const a = asking;
   asking = null;
   const bar = $("#confirm");
-  // the focus goes back to Shots when the bar stands in the settings, as the hidden bar cannot keep it
-  if (bar.contains(document.activeElement) && $<HTMLDialogElement>("#settings").open) $("#lines").focus();
+  // the focus goes back to the control that asked when the bar stands in the settings, as the hidden bar cannot keep it
+  if (bar.contains(document.activeElement) && $<HTMLDialogElement>("#settings").open) (a?.back ?? $("#lines")).focus();
   bar.hidden = true;
   if (!a) return;
   yes ? run(a.c) : a.cancel?.();
@@ -1047,7 +1132,7 @@ function shooterInfo(note = "") {
   button.className = "link-btn";
   button.textContent = `back to ${name(back.shooter)}`;
   button.title = "Shoot with the shooter before. Its kept results show at once.";
-  button.addEventListener("click", () => run({ ...back, lines: lines() }));
+  button.addEventListener("click", () => run({ ...back, lines: lines(), opts: model() }));
   info.append(" · ", button);
 }
 
@@ -1055,16 +1140,19 @@ function shooterInfo(note = "") {
 function newQueue(q: Extract<FromManager, { op: "queue" }>) {
   answer(false); // the question is about the old queue
   const moved = q.shooter !== state.shooter;
-  if (state.shooter && q.shooter !== state.shooter) prev = { shooter: state.shooter, round: state.round, lines: state.lines };
+  if (state.shooter && q.shooter !== state.shooter) prev = { shooter: state.shooter, round: state.round, lines: state.lines, opts: state.opts! };
   state.gen = q.gen;
   state.shooter = q.shooter;
   state.round = q.round ?? -1;
   state.lines = q.lines;
   $<HTMLSelectElement>("#lines").value = String(q.lines);
+  state.opts = q.options;
+  fillModel(q.options);
+  legend(q.options);
   state.rounds = q.rounds ? { range: q.range!, rounds: q.rounds } : null;
   state.queue = q.targets ?? [];
   if (q.source !== undefined) state.data = { source: q.source, version: q.version ?? "" };
-  state.run = state.queue.length ? runKey(state) : "";
+  state.run = state.queue.length ? runKey(state as Choice) : "";
   state.started.clear();
   state.results.clear();
   state.kept.clear();
@@ -1105,7 +1193,7 @@ function newQueue(q: Extract<FromManager, { op: "queue" }>) {
 
 // The key of the results of a choice in the store: all that changes a result.
 function runKey(c: Choice) {
-  return JSON.stringify([BUILD_ID, state.data.source, state.data.version, c.shooter, c.round, c.lines]);
+  return JSON.stringify([BUILD_ID, state.data.source, state.data.version, c.shooter, c.round, c.lines, c.opts]);
 }
 
 // The results of choice c that the store has. A forced round also takes the targets of the run of all rounds,
@@ -1129,7 +1217,7 @@ async function fromStore(gen: number) {
   let have = new Map<string, SimResult>();
   try {
     await store.prune(state.run);
-    have = await stored(state, state.rounds?.rounds);
+    have = await stored(state as Choice, state.rounds?.rounds);
   } catch (err) {
     console.warn(`cannot read the kept results: ${message(err)}`);
   }
@@ -1269,7 +1357,7 @@ function paint(id: string) {
     el.style.setProperty("--bg", color(res.score));
     el.querySelectorAll<HTMLElement>(".card-views i").forEach((i, v) => (i.style.background = color(res.views[v]?.score ?? 0, 46)));
     const bar = el.querySelector<HTMLElement>(".card-gain")!;
-    bar.hidden = !res.shell.followUps;
+    bar.hidden = !res.shell.followUps || !state.opts?.followUps && !state.opts?.pairs;
     if (bar.hidden) continue;
     const [first, follow, pairs] = cardGains(res.views).map((g) => g * 100);
     const [run, dots, tick] = bar.children as HTMLCollectionOf<HTMLElement>;
@@ -1324,6 +1412,8 @@ const pct = (s: number) => `${Math.round(s * 100)}%`;
 function resultBody(res: SimResult, sh: Shell, kept: boolean) {
   const n = state.rounds?.rounds.length ?? 0;
   const guided = !sh.followUps;
+  const o = state.opts!;
+  const follow = !guided && o.followUps, pairs = !guided && o.pairs;
   const views = res.views;
   const fl = views.map((v): Follow => v.follow ?? {});
   const row = (label: string, cell: (i: number) => string, cls = "") =>
@@ -1333,18 +1423,16 @@ function resultBody(res: SimResult, sh: Shell, kept: boolean) {
   let rows = `<tr><th></th>${views.map((v) => `<th>${v.name}</th>`).join("")}</tr>`
     + `<tr class="tt-bars"><td></td>${views.map((v) => `<td><span class="tt-bar">${OUTCOMES.map((o) => v.counts[o] ? `<i class="o-${o}" style="flex:${v.counts[o]}"></i>` : "").join("")}</span></td>`).join("")}</tr>`
     + row("First shot", (i) => `<i class="mk"><i class="tick"></i></i>${pct(g[i][0])}`, "tt-first");
-  if (!guided) {
-    rows += row("+ follow-ups", (i) => `<i class="mk"><i class="run"></i></i>${pct(g[i][1])}`)
-      + row("+ pairs", (i) => `<i class="mk"><i class="dots"></i></i>${pct(g[i][2])}`);
-  }
+  if (follow) rows += row("+ follow-ups", (i) => `<i class="mk"><i class="run"></i></i>${pct(g[i][1])}`);
+  if (pairs) rows += row("+ pairs", (i) => `<i class="mk"><i class="dots"></i></i>${pct(g[i][2])}`);
   for (const o of OUTCOMES) {
     if (views.some((v) => v.counts[o])) rows += row(`<i class="sw o-${o}"></i>${OUTCOME_LABEL[o]}`, (i) => num(views[i].counts[o]));
   }
   rows += row("Lines", (i) => String(OUTCOMES.reduce((a, o) => a + (views[i].counts[o] ?? 0), 0)), "tt-total");
-  if (!guided || any("silenced")) {
-    rows += `<tr class="tt-sec"><td colspan="${views.length + 1}">Extra shots <span class="muted">${guided ? "none: guided" : `${sh.followUps} in ${sh.followSec} s`}</span></td></tr>`;
+  if (follow || pairs || any("silenced")) {
+    rows += `<tr class="tt-sec"><td colspan="${views.length + 1}">Extra shots <span class="muted">${guided ? "none: guided" : follow ? `${sh.followUps} in ${sh.followSec} s` : ""}</span></td></tr>`;
   }
-  if (any("lines")) {
+  if (follow && any("lines")) {
     const mean = (i: number, k: "shots" | "seconds", d: number) => fl[i].kills ? (fl[i][k]! / fl[i].kills!).toFixed(d) : `<span class="z">–</span>`;
     rows += row("Follow-up", (i) => frac(fl[i].kills, fl[i].lines))
       + row(`<span class="ind">shots to kill</span>`, (i) => mean(i, "shots", 1))
@@ -1360,11 +1448,11 @@ function resultBody(res: SimResult, sh: Shell, kept: boolean) {
   }
   const c = cardGains(views);
   return `<div class="tt-shot">${esc(sh.name)} <span class="muted">${shellType(sh.type)}</span> <b>${sh.pen}</b><span class="muted"> mm at ${state.rounds?.range ?? 500} m</span></div>`
-    + `<div class="tt-meta">${esc(sh.gun)} · ${state.round >= 0 ? "only this round" : `best of ${n}`} · ${state.lines} lines${guided ? " · guided" : ` · ${sh.followUps} follow-up${sh.followUps === 1 ? "" : "s"} in ${sh.followSec} s`}</div>`
+    + `<div class="tt-meta">${esc(sh.gun)} · ${state.round >= 0 ? "only this round" : `best of ${n}`} · ${state.lines} lines${guided ? " · guided" : follow ? ` · ${sh.followUps} follow-up${sh.followUps === 1 ? "" : "s"} in ${sh.followSec} s` : ""}</div>`
     + `<table class="tt-t">${rows}</table>`
     + `<div class="tt-sec">Plates</div>`
     + views.map((v) => `<div class="tt-pl"><span>${v.name}</span><span>${v.plates.slice(0, 2).map(plateText).join(" · ")}</span></div>`).join("")
-    + `<div class="tt-foot"><span>Lethality <b>${pct(res.score)}</b>${guided ? "" : ` <span class="muted">→ ${pct(c[1])} → ${pct(c[2])}</span>`}</span>`
+    + `<div class="tt-foot"><span>Lethality <b>${pct(res.score)}</b>${follow || pairs ? ` <span class="muted">${follow ? `→ ${pct(c[1])} ` : ""}${pairs ? `→ ${pct(c[2])}` : ""}</span>` : ""}</span>`
     + `<span class="muted">${res.shots}${res.extra ? ` + ${res.extra}` : ""} shots · ${kept ? "kept" : `${Math.round(res.ms)} ms`}</span></div>`;
 }
 

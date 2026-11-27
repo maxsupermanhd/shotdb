@@ -16,10 +16,11 @@
 // Messages of the page:
 //
 //	{op: "open", id, source}   open the game files of a source; the answer "opened" has the same id
-//	{op: "run", shooter, round, lines}
+//	{op: "run", shooter, round, lines, options}
 //	                           start the queue of the shooter ("" for none), the round (-1 for the
-//	                           best of all) and the shot lines a round (a count of sim.Samples; others
-//	                           keep the count). With no game data, the manager keeps the choice for the next open.
+//	                           best of all), the shot lines a round (a count of sim.Samples; others
+//	                           keep the count) and the model (the JSON of sim.Options). With no game
+//	                           data, the manager keeps the choice for the next open.
 //	{op: "go", gen, done}      start queue gen; done lists the targets that the page has results for
 //	{op: "pause"}              stop or continue the queue
 //	{op: "hold", n}            targets that a compute worker holds at once
@@ -30,7 +31,7 @@
 //	                           absent when it ran none): that target fails, the others go back
 //
 // Messages to the page are JSON strings, see web/src/types.ts. The first one,
-// "samples", gives the line counts that "run" takes. Each new queue ("queue")
+// "samples", gives the line counts that "run" takes and the default model. Each new queue ("queue")
 // waits for the "go" of the page, so that the page can give the results that it keeps.
 package main
 
@@ -75,6 +76,8 @@ type manager struct {
 	shooter    string
 	round      int // -1: the best of all rounds
 	sample     int // index in sim.Samples
+	options    sim.Options
+	optionsRaw string // the JSON of options, for the compute workers
 	rounds     []sim.ShellInfo
 	shooterPkt []byte
 	gen        int // bumps on every queue restart; answers of older queues are dropped
@@ -106,12 +109,12 @@ func push(f func(*manager)) {
 }
 
 func main() {
-	m := &manager{round: -1, sample: sim.DefaultSample, hold: 2}
+	m := &manager{round: -1, sample: sim.DefaultSample, options: sim.DefaultOptions, optionsRaw: "{}", hold: 2}
 	var counts []int
 	for _, s := range sim.Samples {
 		counts = append(counts, s.Lines())
 	}
-	post(map[string]any{"op": "samples", "lines": counts, "default": counts[sim.DefaultSample]})
+	post(map[string]any{"op": "samples", "lines": counts, "default": counts[sim.DefaultSample], "options": sim.DefaultOptions})
 	started := make(chan struct{})
 	api := js.Global().Get("Object").New()
 	api.Set("start", js.FuncOf(func(_ js.Value, args []js.Value) any {
@@ -133,8 +136,15 @@ func main() {
 			push(func(m *manager) { m.open(id, src) })
 		case "run":
 			id, round, n := msg.Get("shooter").String(), msg.Get("round").Int(), msg.Get("lines").Float()
+			raw := msg.Get("options").String()
+			o, err := sim.ParseOptions([]byte(raw))
 			push(func(m *manager) {
 				m.shooter, m.round = id, round
+				if err != nil {
+					post(map[string]any{"op": "error", "error": "manager: " + err.Error()})
+				} else {
+					m.options, m.optionsRaw = o, raw
+				}
 				if i := slices.IndexFunc(sim.Samples, func(s sim.Sample) bool { return float64(s.Lines()) == n }); i >= 0 {
 					m.sample = i
 				}
@@ -287,7 +297,7 @@ func (m *manager) open(id int, src js.Value) {
 	for _, u := range d.Units {
 		units = append(units, u)
 	}
-	post(map[string]any{"op": "opened", "id": id, "info": map[string]any{"source": d.Source, "version": d.Version, "units": units, "trees": d.Trees}})
+	post(map[string]any{"op": "opened", "id": id, "info": map[string]any{"source": d.Source, "version": d.Version, "units": units, "trees": d.Trees, "seatChange": d.Tables.SeatChange}})
 	m.restart() // a shooter that the user picked before stays, if the new data has it
 }
 
@@ -298,7 +308,7 @@ func (m *manager) restart() {
 	m.paused = false // a new shooter, round or line count starts its queue at once
 	m.queue, m.rounds, m.shooterPkt = nil, nil, nil
 	m.total, m.done, m.waiting = 0, 0, false
-	msg := map[string]any{"op": "queue", "gen": m.gen, "shooter": m.shooter, "lines": sim.Samples[m.sample].Lines()}
+	msg := map[string]any{"op": "queue", "gen": m.gen, "shooter": m.shooter, "lines": sim.Samples[m.sample].Lines(), "options": m.options}
 	defer func() {
 		post(msg)
 		m.progress()
@@ -321,13 +331,13 @@ func (m *manager) restart() {
 		msg["error"] = err.Error()
 		return
 	}
-	m.rounds = sim.Rounds(&m.data.Tables, a)
+	m.rounds = sim.Rounds(&m.data.Tables, a, m.options)
 	if m.round >= len(m.rounds) || m.round < 0 {
 		m.round = -1
 	}
 	m.shooterPkt = pkt
 	for _, w := range m.workers {
-		send(w, map[string]any{"op": "shooter", "gen": m.gen, "round": m.round, "sample": m.sample}, pkt)
+		m.sendShooter(w)
 	}
 	br := func(id string) float64 { return m.data.Units[id].BR }
 	sbr := br(m.shooter)
@@ -457,8 +467,12 @@ func (m *manager) join(id int, port js.Value) {
 		send(w, map[string]any{"op": "tables"}, m.tables)
 	}
 	if m.shooterPkt != nil {
-		send(w, map[string]any{"op": "shooter", "gen": m.gen, "round": m.round, "sample": m.sample}, m.shooterPkt)
+		m.sendShooter(w)
 	}
+}
+
+func (m *manager) sendShooter(w *worker) {
+	send(w, map[string]any{"op": "shooter", "gen": m.gen, "round": m.round, "sample": m.sample, "options": m.optionsRaw}, m.shooterPkt)
 }
 
 // leave removes a worker. The shot that it ran when it failed, if one, fails

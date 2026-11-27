@@ -181,10 +181,11 @@ type Shell struct {
 	Guided  bool
 
 	// Fire rate of the weapon that fires the round.
-	ShotFreq  float64   // shots/s of one barrel, with the best loader
-	Barrels   []float64 // timeOffset of each barrel, s
-	Cartridge int       // bulletsCartridge: shots of one barrel between magazine reloads
-	MagReload float64   // reloadTime of the magazine, s
+	ShotFreq   float64   // shots/s of one barrel, with the best loader
+	Barrels    []float64 // timeOffset of each barrel, s
+	Cartridge  int       // bulletsCartridge: shots of one barrel between magazine reloads
+	MagReload  float64   // reloadTime of the magazine, s
+	AutoLoader bool      // the loader skill does not change the reload
 
 	DeMarre     *DeMarre
 	LanzOd      *LanzOdermatt

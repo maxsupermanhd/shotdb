@@ -390,17 +390,25 @@ func (d *Data) loadTables() error {
 	if err != nil {
 		return err
 	}
-	// changeTimeMultiplier is [lowest skill, highest skill].
+	// The skill values are [lowest skill, highest skill].
 	cp, _ := rank["crew_parameters"].(tree)
 	tc, _ := cp["tank_crew"].(tree)
-	tg, _ := tc["tank_gunner"].(tree)
-	mult := 1.0
-	if m, ok := tg["changeTimeMultiplier"].([]any); ok {
-		if p, ok := vec2(m); ok {
-			mult = p.Y
+	skill := func(role, key string) (dm.Point, bool) {
+		r, _ := tc[role].(tree)
+		if m, ok := r[key].([]any); ok {
+			return vec2(m)
 		}
+		return dm.Point{}, false
+	}
+	mult := 1.0
+	if p, ok := skill("tank_gunner", "changeTimeMultiplier"); ok {
+		mult = p.Y
 	}
 	d.SeatChange = numOr(gp, "gunnerChangeTime", 3) * mult
+	d.StockLoad = 1.3
+	if p, ok := skill("loader", "loadingTimeMult"); ok && p.Y > 0 {
+		d.StockLoad = p.X / p.Y
+	}
 
 	expl, err := d.blk("aces", "gamedata/damage_model/explosive.blk")
 	if err != nil {

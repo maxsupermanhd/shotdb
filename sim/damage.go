@@ -37,9 +37,10 @@ func (t *target) crewHit(d damage) bool {
 
 // silenced tells whether the target cannot fire its main gun back, and for how
 // long in seconds: +Inf when no crew member can fix it. A broken barrel or
-// breech on every mount, or a dead turret drive, stops the gun. A dead gunner
-// stops it when no live crew part has the override, until a substitute takes the seat.
-func (t *target) silenced(d damage, tables *dm.Tables) (bool, float64) {
+// breech on every mount, or a dead turret drive (with o.Drives), stops the gun.
+// A dead gunner stops it when no live crew part has the override (with
+// o.Override), until a substitute takes the seat.
+func (t *target) silenced(d damage, tables *dm.Tables, o Options) (bool, float64) {
 	g := t.v.Gun
 	if g == nil {
 		return false, 0
@@ -68,15 +69,19 @@ func (t *target) silenced(d damage, tables *dm.Tables) (bool, float64) {
 			out = false
 		}
 	}
-	if out || drive(g.HorDrive) || drive(g.VerDrive) {
+	if out || o.Drives && (drive(g.HorDrive) || drive(g.VerDrive)) {
 		return true, math.Inf(1)
 	}
-	if g.Gunner == "" || !dead(g.Gunner) || g.Override != "" && t.index(g.Override) >= 0 && !dead(g.Override) {
+	if g.Gunner == "" || !dead(g.Gunner) || o.Override && g.Override != "" && t.index(g.Override) >= 0 && !dead(g.Override) {
 		return false, 0
+	}
+	seat := tables.SeatChange
+	if o.SeatChange >= 0 {
+		seat = o.SeatChange
 	}
 	for _, sub := range g.Substitutes {
 		if t.index(sub) >= 0 && !dead(sub) {
-			return true, tables.SeatChange * g.ChangeMult
+			return true, seat * g.ChangeMult
 		}
 	}
 	return true, math.Inf(1)
@@ -126,8 +131,11 @@ func (s *shot) resolve(d damage) fate {
 		if dead[m.part] || p.HP <= 0 {
 			continue
 		}
-		// The gun, its barrel and the sights are hit from outside, with no hole in the armour.
-		if g := p.Group; !(g == "gun" || g == "optics" || g == "commander_panoramic_sight" || strings.HasPrefix(p.Name, "gun_barrel")) {
+		// The gun, its barrel and the sights are hit from outside, with no hole in the armour. Without
+		// Options.Outside, the other parts outside the armour make a pen only when the shell went through a plate.
+		g := p.Group
+		if !(g == "gun" || g == "optics" || g == "commander_panoramic_sight" || strings.HasPrefix(p.Name, "gun_barrel")) &&
+			(s.outside || s.through || !(g == "fuel_tanks_exterior" || p.Class == "optics_tank" || p.Class == "tank_barrel")) {
 			f.interior = true
 		}
 		left := math.Max(0, state(m.part)-m.amount)

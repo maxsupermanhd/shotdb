@@ -6,8 +6,9 @@
 // target's collision resource.
 //
 //	compute.tables(bytes)                 -> error message, "" if none
-//	compute.shooter(bytes, round, sample) -> error message, "" if none; round -1 for the best,
-//	                                         sample an index in sim.Samples
+//	compute.shooter(bytes, round, sample, options)
+//	                                      -> error message, "" if none; round -1 for the best,
+//	                                         sample an index in sim.Samples, options the JSON of sim.Options
 //	compute.simulate(bytes, collision)    -> JSON of a sim.Result, or {target, error}
 //
 // Each call is synchronous. A panic comes back as an error.
@@ -31,6 +32,7 @@ var (
 	shooter *dm.Vehicle
 	round   = -1
 	sample  = sim.Samples[sim.DefaultSample]
+	options = sim.DefaultOptions
 )
 
 func main() {
@@ -53,6 +55,9 @@ func main() {
 				return fmt.Errorf("no sample %d", i)
 			}
 			sample = sim.Samples[i]
+			if options, err = sim.ParseOptions([]byte(args[3].String())); err != nil {
+				return err
+			}
 			shooter, err = packet.ReadShooter(bytesOf(args[0]))
 			return err
 		})
@@ -74,7 +79,7 @@ func main() {
 			if tables == nil || shooter == nil {
 				return errors.New("no tables or shooter yet")
 			}
-			r, err := sim.Simulate(tables, shooter, v, nodes, round, sample)
+			r, err := sim.Simulate(tables, shooter, v, nodes, round, sample, options)
 			if err != nil {
 				return err
 			}

@@ -38,6 +38,7 @@ export interface GameInfo {
   version: string;
   units: Unit[];
   trees: Tree[];
+  seatChange: number; // s for a crew member to take the gunner's seat, with the best crew: the game's value
 }
 
 export type Outcome = "kill" | "pen" | "shatter" | "ricochet" | "nonpen";
@@ -81,7 +82,7 @@ export interface Shell {
   pen: number; // mm flat at the range
   filler: number; // kg, 0 if none
   explosive: string;
-  followUps?: number; // shots after the first in 1.5 s, at least 1; none for a guided round
+  followUps?: number; // shots after the first in the window of Options, at least 1; none for a guided round
   followSec?: number; // time of the last follow-up, s
   thirdSec?: number; // time of the third shot, s
 }
@@ -123,10 +124,24 @@ export type Source =
   | { kind: "handle"; handle: FileSystemDirectoryHandle }
   | { kind: "files"; files: Map<string, File> };
 
+// The model settings, as sim.Options. The manager gives the defaults in "samples".
+export interface Options {
+  followUps: boolean;
+  pairs: boolean;
+  returnFire: boolean;
+  window: number; // s after the first shot in which the follow-ups fall
+  stock: boolean; // a manual loader is slower
+  lastRound: boolean; // the first shot fires the last round of the magazine
+  seatChange: number; // s to take the gunner's seat; less than 0 for the game's value
+  override: boolean; // a live secondGunnerDm crew part fires the gun for a dead gunner
+  drives: boolean; // a dead turret drive stops the gun
+  outside: boolean; // a hit on an outside part is a pen, also when the shell then stops on the armour
+}
+
 // Page -> manager. See cmd/manager.
 export type ToManager =
   | { op: "open"; id: number; source: Source }
-  | ({ op: "run" } & Choice)
+  | { op: "run"; shooter: string; round: number; lines: number; options: string } // options: the JSON of Options
   | { op: "go"; gen: number; done: string[] } // start queue gen; done: the targets that the page has results for
   | { op: "pause" }
   | { op: "hold"; n: number }
@@ -139,6 +154,7 @@ export interface Choice {
   shooter: string; // "" for none
   round: number; // the only round to fire, or -1 for the best of all
   lines: number;
+  opts: Options;
 }
 
 export interface Progress {
@@ -151,10 +167,10 @@ export interface Progress {
 
 // Manager -> page, as JSON strings. gen is the queue that the message is about.
 export type FromManager =
-  | { op: "samples"; lines: number[]; default: number } // the line counts that "run" takes
+  | { op: "samples"; lines: number[]; default: number; options: Options } // the line counts that "run" takes, and the default model
   | { op: "opened"; id: number; info?: GameInfo; error?: string }
   // a new queue, which waits for "go"; source and version of the game data when the manager has data
-  | { op: "queue"; gen: number; shooter: string; lines: number; source?: string; version?: string; error?: string; round?: number; range?: number; rounds?: Shell[]; targets?: string[] }
+  | { op: "queue"; gen: number; shooter: string; lines: number; options: Options; source?: string; version?: string; error?: string; round?: number; range?: number; rounds?: Shell[]; targets?: string[] }
   | { op: "start"; gen: number; target: string }
   | { op: "back"; gen: number; targets: string[] } // targets that went back in the queue
   | ({ op: "result"; gen: number; target: string } & ({ result: SimResult } | { error: string }))
@@ -166,7 +182,7 @@ export type FromManager =
 export type ToCompute =
   | { op: "gen"; gen: number }
   | { op: "tables"; buf: Uint8Array }
-  | { op: "shooter"; gen: number; round: number; sample: number; buf: Uint8Array } // sample: an index in sim.Samples
+  | { op: "shooter"; gen: number; round: number; sample: number; options: string; buf: Uint8Array } // sample: an index in sim.Samples; options: the JSON of Options
   | { op: "target"; gen: number; target: string; buf: Uint8Array; blob: Blob };
 
 // Compute worker -> manager: the JSON of a SimResult or a SimError, or no result when the target was skipped.

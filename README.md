@@ -102,10 +102,11 @@ outwards, up and down. Hover a card for the details.
 and take no new one. **Resume** continues from the same place. A new shooter or round starts
 its queue at once, also when the queue is paused.
 
-A click on a card or a round, or a change of **Shots**, first asks in a small bar over the
-trees when it would stop a queue that has work left (running or paused). When the settings are
-open, the bar stands in the settings under **Shots**: **Run** (or Enter)
-starts the new queue, **Cancel** (or Escape) keeps the old one and puts **Shots** back. The
+A click on a card or a round, or a change of **Shots** or of a model setting, first asks in a
+small bar over the trees when it would stop a queue that has work left (running or paused).
+When the settings are open, the bar stands in the settings under **Shots** or under the model
+settings: **Run** (or Enter) starts the new queue, **Cancel** (or Escape) keeps the old one and
+puts the setting back. The
 results of the stopped queue stay kept (see [Kept results](#kept-results)). The page does not
 ask when no queue runs, when the queue is done or stopped, when the kept results hold all
 targets of the new choice, or when you pick the shooter in the box at the top. After a change
@@ -121,8 +122,8 @@ kept, and the time a pair counts only the targets that ran now.
 
 The key of a run holds all that changes a result: the build of the simulation code (a hash
 of `manager.wasm` and `compute.wasm` that `cmd/build` puts in the page as `BUILD_ID`), the
-source and the version of the game data, the shooter, the round (-1 for the best of all) and
-the shot lines a round. A result stays valid for 24 hours after it ran. The page does not use
+source and the version of the game data, the shooter, the round (-1 for the best of all), the
+shot lines a round and all model settings. A result stays valid for 24 hours after it ran. The page does not use
 an older result and runs the target again. Errors are not kept.
 
 When all rounds are fired, a result also holds the views, the score and the shots of each
@@ -204,8 +205,9 @@ The new tree slides in from the side of its chip or its arrow. With
 ### Settings
 
 The cog to the left of the shooter box opens the settings. Escape, **Close** or a click outside
-the settings closes them. The settings hold **Shots**, **Workers**, the colours of the results and
-the game folder. The page keeps each setting as below.
+the settings closes them. The settings hold **Shots**, **Workers**, the model, the colours of the
+results and the game folder. The page keeps each setting as below. When the browser refuses to
+keep a setting in `localStorage`, the setting holds only until the page closes.
 
 **Shots** sets the number of shot lines that each round fires at
 each target: 40, 80, 160, 384 or 768. The default is 160. More lines give a finer result and
@@ -229,6 +231,38 @@ the queue stopped. A change of **Workers** starts new ones.
 When the manager fails, the page shows the error and the queue stops. The next open starts a
 new manager. When an open fails, the manager keeps the data that it had, and its queue goes on.
 
+### Model settings
+
+The **Model** part of the settings changes the rules of the simulation. The defaults give the model
+that this README describes. A change starts the queue of the shooter again, as a change of
+**Shots** does. The page keeps the settings that differ from the defaults in `localStorage`
+(`shotdb.model`). **Defaults** puts all of them back.
+
+| setting | default | what it does |
+| --- | --- | --- |
+| Follow-ups | on | Fires the follow-ups (see [Follow-up shots](#follow-up-shots)). Off: no follow-up runs, and the details and the gain bar show no follow-up gain. |
+| in … s | 1.5 | The time after the first shot in which the follow-ups fall, 0 to 10 s. There is always at least one follow-up. |
+| Pairs | on | Fires the two-shot pairs. Off: no pair runs. With the follow-ups off, the pairs still start on the gated lines. |
+| Loader | aced | Stock: a gun without `autoLoader` takes `loadingTimeMult` (lowest skill over highest skill in `rank.blk`, 1.3) times as long. On a single-shot gun this is each reload, on a magazine gun the magazine reload. |
+| Magazine | full | Last round: the first shot fires the last round of each barrel's magazine, so the next shot of that barrel waits for the magazine. Only guns with `bulletsCartridge` over 1 change. |
+| Return fire: Check | on | Checks if the target can fire back (see "No return fire"). Off: no check, no third shot. |
+| Seat change | empty | The time for a crew member to take the gunner's seat, 0 to 60 s, before the unit's `changeTimeMult`. Empty: the game's value with the best crew, which the box shows in grey (2.4 s). |
+| Commander fires | on | A live crew part in `secondGunnerDm` fires the gun when the gunner is dead. Off: only a substitute in the gunner's seat fires it. |
+| Drive stops gun | on | A dead turret drive stops the gun for good. Off: the drives do not count. |
+| Outside parts count | on | Damage to an exterior fuel tank, or to a sight or a barrel out of the gun and optics groups, makes the line "pen", also when the shell then stops on the armour. Off: such damage makes a pen only when the shell body or jet went through a plate. |
+
+Loader and Magazine change the times of the follow-ups and of the third shot. They have no
+effect when Follow-ups and the return fire check are both off, so the page then turns them off.
+The window has no effect without the follow-ups. The seat change, the commander and the drives
+have no effect without the check.
+
+A feature that is off costs no time. Only **Outside parts count** changes the outcomes, the
+scores and the card colour. The other settings change only the extra shots. Most lines that
+**Outside parts count** changes have their pen from an exterior fuel tank. In a check on the
+2.61.0.44 install (M4A2, Leopard 2A6 and M42 on every third unit, 40 lines, 1263 pairs), 843
+lines had a pen only from an exterior fuel tank, and 16 only from a sight or a barrel out of the
+gun and optics groups.
+
 URL parameters: `view` (`horizontal`, `compact` or `nation`; no `view` or `all` is **Vertical**) and `nation` (the
 nation of the one-nation view; a link or a reload keeps it), `nations` (comma list), `speed` (targets that a compute worker holds at once:
 one runs and the others wait; 1 to 8, default 2; the manager uses 2 for other values) and
@@ -240,7 +274,10 @@ nation of that unit).
     go run ./cmd/shotsim -data <install or datamine> us_m4a2_sherman germ_pzkpfw_vi_ausf_h1_tiger
 
 prints the result JSON that the page shows, with the result of each round in `each`. `-lines` sets the shot lines a round, as **Shots**
-does in the page (default 160).
+does in the page (default 160). The model settings have flags with the same defaults: `-follow`,
+`-window`, `-pairs`, `-stock`, `-lastround`, `-return`, `-seat` (less than 0 for the game's value),
+`-override`, `-drives` and `-outside`. To turn off a toggle that is on by default, write
+`-pairs=false`.
 
 ## Layout
 
@@ -257,12 +294,13 @@ does in the page (default 160).
   from `units.csv`), damage parts, crew, ammo racks, shells, the damage model tables and the
   collision nodes, from either source, into the `dm` types. `game/shop.go` lays out the trees
   (see below).
-- `sim/` is the simulation: `sim.Rounds(tables, shooter)` and
-  `sim.Simulate(tables, shooter, target, nodes, round)`. It imports only `dm` and `geom`.
+- `sim/` is the simulation: `sim.Rounds(tables, shooter, options)` and
+  `sim.Simulate(tables, shooter, target, nodes, round, sample, options)`. `sim.Options` holds
+  the model settings. It imports only `dm` and `geom`.
 - `packet/` encodes what the manager sends to the compute workers (see [Workers](#workers)).
 - `cmd/manager` is the manager's wasm. Its doc comment lists the messages of the page.
 - `cmd/compute` is the compute workers' wasm: `compute.tables(packet)`,
-  `compute.shooter(packet, round)` and `compute.simulate(packet, collision)`. `round` -1 fires
+  `compute.shooter(packet, round, sample, options)` and `compute.simulate(packet, collision)`. `round` -1 fires
   every round and keeps the best. It imports no `game`, BLK or vromfs code. It uses `grp` and
   zstd to parse the collision resource of each target.
 - `web/` holds the page sources: `index.html`, `style.css` and `src/`. `src/manager.ts` runs
@@ -416,10 +454,11 @@ card and the hover and pinned details show their effect (see "Colours"). `shotsi
 `followUps`, `followSec` and `thirdSec`.
 
 The shooter's schedule comes from the weapon of the round. Each barrel fires at its
-`timeOffset`, then each `1 / shotFreq` (the best loader; a stock loader is 1.3 times slower).
-After `bulletsCartridge` shots, a barrel waits for the magazine (`reloadTime`). The magazine
-is full at the first shot. The follow-ups are the shots in the 1.5 s after the first shot, and
-at least one: the M4A2 fires one at 5 s, the M42 fires 6, the ZSU-23-4 fires 85. A guided
+`timeOffset`, then each `1 / shotFreq` (the best loader). After `bulletsCartridge` shots, a
+barrel waits for the magazine (`reloadTime`). The magazine is full at the first shot. The
+follow-ups are the shots in the 1.5 s after the first shot, and at least one: the M4A2 fires one
+at 5 s, the M42 fires 6, the ZSU-23-4 fires 85. The [model settings](#model-settings) change the
+loader, the magazine and the window, and turn each part below on or off. A guided
 round fires no follow-ups, no pairs and no third shot.
 
 1. **Follow-ups.** A first shot that penetrates ("pen, no kill" or "pen, core broke"), damages crew (hp lost) and
@@ -473,8 +512,9 @@ to green at 1. The three strips at the bottom are the scores of front, side and 
 
 The gain bar over the strips shows the card score on a scale of 0 to 100 %. The white tick is
 the first-shot score. The solid run is the gain from the follow-ups. The dotted run is the gain
-from the pairs. A guided round fires no extra shots, so its cards have no bar. The settings show
-the legend. For each view, with k kills, p pens and core breaks, n lines, g gated lines, f
+from the pairs. A guided round fires no extra shots, so its cards have no bar. With the
+follow-ups and the pairs both off, no card has a bar. The settings show the legend, with only
+the gains that the model fires. For each view, with k kills, p pens and core breaks, n lines, g gated lines, f
 follow-up kills and r = pair kills / pairs:
 
 - first shot: `(k + 0.4p) / n`, the score as before

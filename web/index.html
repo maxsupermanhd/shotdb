@@ -11,7 +11,7 @@
   <div class="search">
     <div class="search-row">
       <span class="brand">shotdb</span>
-      <button id="cog" class="cog" aria-haspopup="dialog" aria-controls="settings" title="Settings: shots, workers, colours and the game folder">
+      <button id="cog" class="cog" aria-haspopup="dialog" aria-controls="settings" title="Settings: shots, workers, model, colours and the game folder">
         <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M19.4 13a7.6 7.6 0 0 0 0-2l2.1-1.6a.5.5 0 0 0 .1-.6l-2-3.5a.5.5 0 0 0-.6-.2l-2.5 1a7.3 7.3 0 0 0-1.7-1L14.4 2.4a.5.5 0 0 0-.5-.4h-4a.5.5 0 0 0-.5.4L9 5.1a7.3 7.3 0 0 0-1.7 1l-2.5-1a.5.5 0 0 0-.6.2l-2 3.5a.5.5 0 0 0 .1.6L4.6 11a7.6 7.6 0 0 0 0 2l-2.1 1.6a.5.5 0 0 0-.1.6l2 3.5a.5.5 0 0 0 .6.2l2.5-1a7.3 7.3 0 0 0 1.7 1l.4 2.7a.5.5 0 0 0 .5.4h4a.5.5 0 0 0 .5-.4l.4-2.7a7.3 7.3 0 0 0 1.7-1l2.5 1a.5.5 0 0 0 .6-.2l2-3.5a.5.5 0 0 0-.1-.6zM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z"/></svg>
         <span class="sr-only">Settings</span>
       </button>
@@ -87,6 +87,34 @@
       <div id="confirm-slot"></div>
     </section>
     <section class="set">
+      <div class="set-head">
+        <h3>Model</h3>
+        <button id="model-reset" class="link-btn" title="Put all model settings back to the defaults">Defaults</button>
+      </div>
+      <div id="model" class="model">
+        <span class="set-sub">Extra shots</span>
+        <div class="set-row">
+          <label class="check" title="After a first shot that penetrates, hurts crew and does not kill, fire the next shots along the same line"><input type="checkbox" data-opt="followUps"> Follow-ups</label>
+          <label class="field" title="Time after the first shot in which the follow-ups fall">in <input type="number" data-opt="window" min="0" max="10" step="0.1"> s</label>
+          <label class="check" title="In each shot direction, fire a second shot along each other line"><input type="checkbox" data-opt="pairs"> Pairs</label>
+          <label class="field" title="A stock loader is slower. An autoloader does not change.">Loader <select data-opt="stock"><option value="0">aced</option><option value="1">stock</option></select></label>
+          <label class="field" title="Rounds in the magazine at the first shot">Magazine <select data-opt="lastRound"><option value="0">full</option><option value="1">last round</option></select></label>
+        </div>
+        <span class="set-sub">Return fire</span>
+        <div class="set-row">
+          <label class="check" title="After the first shot, check if the target can still fire its main gun"><input type="checkbox" data-opt="returnFire"> Check</label>
+          <label class="field" title="Time for a crew member to take the gunner's seat. Empty: the game's value with the best crew.">Seat change <input type="number" data-opt="seatChange" min="0" max="60" step="0.1"> s</label>
+          <label class="check" title="A live commander (secondGunnerDm) can fire the gun when the gunner is dead"><input type="checkbox" data-opt="override"> Commander fires</label>
+          <label class="check" title="A dead turret drive stops the gun"><input type="checkbox" data-opt="drives"> Drive stops gun</label>
+        </div>
+        <span class="set-sub">Pens</span>
+        <div class="set-row">
+          <label class="check" title="Damage to an exterior fuel tank or another part outside the armour is a pen, also when the shell then stops on the armour"><input type="checkbox" data-opt="outside"> Outside parts count</label>
+        </div>
+      </div>
+      <div id="model-slot"></div>
+    </section>
+    <section class="set">
       <h3>Colours</h3>
       <div class="legend">
         <span class="legend-scale"></span>
@@ -94,8 +122,8 @@
         <span class="legend-pending">queued</span>
         <span class="legend-gain">
           <span><i class="mk"><i class="tick"></i></i>first shot</span>
-          <span><i class="mk"><i class="run"></i></i>+ follow-ups</span>
-          <span><i class="mk"><i class="dots"></i></i>+ pairs</span>
+          <span id="legend-follow"><i class="mk"><i class="run"></i></i>+ follow-ups</span>
+          <span id="legend-pairs"><i class="mk"><i class="dots"></i></i>+ pairs</span>
           <span>no bar: guided</span>
         </span>
       </div>

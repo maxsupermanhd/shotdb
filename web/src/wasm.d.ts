@@ -20,7 +20,7 @@ declare var manager: {
 // Each gives an error message, "" if none, or undefined when the Go program exits in the call.
 declare var compute: {
   tables(packet: Uint8Array): string | undefined;
-  shooter(packet: Uint8Array, round: number, sample: number): string | undefined; // round -1: the best of all
+  shooter(packet: Uint8Array, round: number, sample: number, options: string): string | undefined; // round -1: the best of all; options: the JSON of sim.Options
   // JSON of a SimResult or a SimError
   simulate(packet: Uint8Array, collision: Uint8Array): string | undefined;
 };
