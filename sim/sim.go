@@ -122,7 +122,7 @@ type Options struct {
 	Window     float64 `json:"window"`     // s after the first shot in which the follow-ups fall
 	Stock      bool    `json:"stock"`      // a manual loader takes Tables.StockLoad times the best reload
 	LastRound  bool    `json:"lastRound"`  // the first shot fires the last round of the magazine
-	SeatChange float64 `json:"seatChange"` // s to take the gunner's seat; less than 0 for the game's value
+	SeatChange float64 `json:"seatChange"` // s to take the gunner's seat; -1 for the game's value
 	Override   bool    `json:"override"`   // a live secondGunnerDm crew part fires the gun for a dead gunner
 	Drives     bool    `json:"drives"`     // a dead turret drive stops the gun
 	Outside    bool    `json:"outside"`    // a module that the shell hits before it goes through a plate makes a pen
@@ -142,13 +142,14 @@ func ParseOptions(b []byte) (Options, error) {
 	return o, o.Check()
 }
 
-// Check tells whether the times are in range.
+// Check tells whether the times are in range. Only -1 stands for the game's
+// seat change, so that each model has one JSON for the key of the kept results.
 func (o Options) Check() error {
 	if o.Window < 0 || o.Window > MaxWindow {
 		return fmt.Errorf("options: window %g s is not in 0 to %g s", o.Window, MaxWindow)
 	}
-	if o.SeatChange > MaxSeatChange {
-		return fmt.Errorf("options: seat change %g s is more than %g s", o.SeatChange, MaxSeatChange)
+	if o.SeatChange != -1 && (o.SeatChange < 0 || o.SeatChange > MaxSeatChange) {
+		return fmt.Errorf("options: seat change %g s is not -1 or in 0 to %g s", o.SeatChange, MaxSeatChange)
 	}
 	return nil
 }

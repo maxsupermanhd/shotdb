@@ -33,7 +33,7 @@ func main() {
 	flag.Float64Var(&o.Window, "window", o.Window, "s after the first shot for the follow-ups")
 	flag.BoolVar(&o.Stock, "stock", o.Stock, "stock loader: a manual loader is slower")
 	flag.BoolVar(&o.LastRound, "lastround", o.LastRound, "the first shot fires the last round of the magazine")
-	flag.Float64Var(&o.SeatChange, "seat", o.SeatChange, "s to take the gunner's seat; less than 0 for the game's value")
+	flag.Float64Var(&o.SeatChange, "seat", o.SeatChange, "s to take the gunner's seat, 0 to 60; -1 for the game's value")
 	flag.BoolVar(&o.Override, "override", o.Override, "a second gunner (secondGunnerDm) fires for a dead gunner")
 	flag.BoolVar(&o.Drives, "drives", o.Drives, "a dead turret drive stops the gun")
 	flag.BoolVar(&o.Outside, "outside", o.Outside, "a module hit before the shell goes through a plate makes a pen")

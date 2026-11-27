@@ -106,7 +106,8 @@ A click on a card or a round, or a change of **Shots** or of a model setting, fi
 small bar over the trees when it would stop a queue that has work left (running or paused).
 When the settings are open, the bar stands in the settings under **Shots** or under the model
 settings: **Run** (or Enter) starts the new queue, **Cancel** (or Escape) keeps the old one and
-puts the setting back. The
+puts **Shots** and the model back to the settings of that queue. A change while the bar asks
+adds to the question, so that the settings always show what **Run** starts. The
 results of the stopped queue stay kept (see [Kept results](#kept-results)). The page does not
 ask when no queue runs, when the queue is done or stopped, when the kept results hold all
 targets of the new choice, or when you pick the shooter in the box at the top. After a change
@@ -246,7 +247,7 @@ that this README describes. A change starts the queue of the shooter again, as a
 | Loader | aced | Stock: a gun without `autoLoader` takes `loadingTimeMult` (lowest skill over highest skill in `rank.blk`, 1.3) times as long. On a single-shot gun this is each reload, on a magazine gun the magazine reload. |
 | Magazine | full | Last round: the first shot fires the last round of each barrel's magazine, so the next shot of that barrel waits for the magazine. Only guns with `bulletsCartridge` over 1 change. |
 | Return fire: Check | on | Checks if the target can fire back (see "No return fire"). Off: no check, no third shot. |
-| Seat change | empty | The time for a crew member to take the gunner's seat, 0 to 60 s, before the unit's `changeTimeMult`. Empty: the game's value with the best crew, which the box shows in grey (2.4 s). |
+| Seat change | empty | The time for a crew member to take the gunner's seat, 0 to 60 s, before the unit's `changeTimeMult`. Empty: the game's value with the best crew, which the box shows in grey (2.4 s). The page refuses a value out of 0 to 60 s and puts the old value back. |
 | Commander fires | on | A live crew part in `secondGunnerDm` fires the gun when the gunner is dead. Off: only a substitute in the gunner's seat fires it. |
 | Drive stops gun | on | A dead turret drive stops the gun for good. Off: the drives do not count. |
 | Outside parts count | on | Damage to an exterior fuel tank, or to a sight or a barrel out of the gun and optics groups, makes the line "pen", also when the shell then stops on the armour. Off: such damage makes a pen only when the shell body or jet went through a plate. |
@@ -275,7 +276,7 @@ nation of that unit).
 
 prints the result JSON that the page shows, with the result of each round in `each`. `-lines` sets the shot lines a round, as **Shots**
 does in the page (default 160). The model settings have flags with the same defaults: `-follow`,
-`-window`, `-pairs`, `-stock`, `-lastround`, `-return`, `-seat` (less than 0 for the game's value),
+`-window`, `-pairs`, `-stock`, `-lastround`, `-return`, `-seat` (-1 for the game's value),
 `-override`, `-drives` and `-outside`. To turn off a toggle that is on by default, write
 `-pairs=false`.
 

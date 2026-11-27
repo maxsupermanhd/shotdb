@@ -132,7 +132,7 @@ function setupLines() {
   const select = $<HTMLSelectElement>("#lines");
   select.addEventListener("change", () => {
     const n = Number(select.value);
-    choose({ shooter: state.shooter, round: state.round, lines: n, opts: model() }, `Fire ${n} lines a round?`, () => (select.value = String(state.lines)));
+    choose({ shooter: state.shooter, round: state.round, lines: n, opts: model() }, `Fire ${n} lines a round?`);
   });
 }
 
@@ -140,9 +140,10 @@ function setupLines() {
 function setupModel() {
   const ask = () => {
     const o = model();
-    if (!(o.window >= 0 && o.window <= 10) || !(o.seatChange <= 60)) return fillModel(shownModel());
+    // A bad value goes back to the model that Run starts, or to the shown one.
+    if (!(o.window >= 0 && o.window <= 10) || !(o.seatChange === -1 || o.seatChange >= 0 && o.seatChange <= 60)) return fillModel(asking?.c.opts ?? shownModel());
     modelState(o);
-    choose({ shooter: state.shooter, round: state.round, lines: lines(), opts: o }, "Run with the new model?", () => fillModel(shownModel()), "#model-slot");
+    choose({ shooter: state.shooter, round: state.round, lines: lines(), opts: o }, "Run with the new model?", "#model-slot");
   };
   $("#model").addEventListener("change", ask);
   $("#model-reset").addEventListener("click", () => {
@@ -156,6 +157,11 @@ const modelFields = () => document.querySelectorAll<HTMLInputElement | HTMLSelec
 const field = (k: keyof Options) => $<HTMLInputElement | HTMLSelectElement>(`#model [data-opt="${k}"]`);
 // the model of the shown queue, or before the first queue the kept one
 const shownModel = (): Options => state.opts ?? { ...defaults!, ...savedModel() };
+// Puts Shots and the model back to the shown queue.
+function applied() {
+  if (state.lines) $<HTMLSelectElement>("#lines").value = String(state.lines);
+  fillModel(shownModel());
+}
 
 // the model in the settings, in the key order of the defaults
 function model(): Options {
@@ -1037,11 +1043,12 @@ function selectShooter(id: string) {
 }
 
 // The choice in the confirm bar. In the open settings the bar stands in slot, and the focus goes back to back.
-let asking: { c: Choice; cancel?: () => void; slot: string; back: HTMLElement | null } | null = null;
+let asking: { c: Choice; slot: string; back: HTMLElement | null } | null = null;
 
 // Runs choice c. When the queue still has work and the store does not have all results of c, the confirm bar
-// asks first. cancel undoes the control's change when the user says no.
-async function choose(c: Choice, question: string, cancel?: () => void, slot = "#confirm-slot") {
+// asks first. The settings show the choice that Run starts: a new question replaces the old one, and its choice
+// holds the changes of the old one. Cancel puts the settings back to the shown queue.
+async function choose(c: Choice, question: string, slot = "#confirm-slot") {
   const back = document.activeElement instanceof HTMLElement && document.activeElement.closest("#settings") ? document.activeElement : null;
   const busy = () => state.shooter !== "" && state.progress.done < state.progress.total && !state.stopped && pool.length > 0;
   if (!busy()) return run(c);
@@ -1052,8 +1059,7 @@ async function choose(c: Choice, question: string, cancel?: () => void, slot = "
     console.warn(`cannot read the kept results: ${message(err)}`);
   }
   if (!busy() || have >= state.queue.length) return run(c);
-  asking?.cancel?.();
-  asking = { c, cancel, slot, back };
+  asking = { c, slot, back };
   const { done, total } = state.progress;
   $("#confirm-text").textContent = `${question} The queue of ${name(state.shooter)} stops at ${done} / ${total}; its results stay kept.`
     + (have ? ` ${have} of the new results are kept already.` : "");
@@ -1079,7 +1085,7 @@ function answer(yes: boolean) {
   if (bar.contains(document.activeElement) && $<HTMLDialogElement>("#settings").open) (a?.back ?? $("#lines")).focus();
   bar.hidden = true;
   if (!a) return;
-  yes ? run(a.c) : a.cancel?.();
+  yes ? run(a.c) : applied();
 }
 
 function setupSettings() {

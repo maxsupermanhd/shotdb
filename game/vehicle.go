@@ -347,6 +347,7 @@ func (d *Data) shells(t tree, v *dm.Vehicle) error {
 			s.ShotFreq = numOr(w, "shotFreq", wp.shotFreq)
 			s.Cartridge = wp.cartridge
 			s.MagReload = numOr(w, "reloadTime", wp.reload)
+			s.AutoLoader = slices.ContainsFunc(mounts, func(m tree) bool { return m["autoLoader"] == true })
 			for _, m := range mounts {
 				s.Barrels = append(s.Barrels, numOr(m, "timeOffset", 0))
 			}

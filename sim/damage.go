@@ -76,7 +76,7 @@ func (t *target) silenced(d damage, tables *dm.Tables, o Options) (bool, float64
 		return false, 0
 	}
 	seat := tables.SeatChange
-	if o.SeatChange >= 0 {
+	if o.SeatChange != -1 {
 		seat = o.SeatChange
 	}
 	for _, sub := range g.Substitutes {

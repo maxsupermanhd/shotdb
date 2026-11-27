@@ -132,7 +132,7 @@ export interface Options {
   window: number; // s after the first shot in which the follow-ups fall
   stock: boolean; // a manual loader is slower
   lastRound: boolean; // the first shot fires the last round of the magazine
-  seatChange: number; // s to take the gunner's seat; less than 0 for the game's value
+  seatChange: number; // s to take the gunner's seat; -1 for the game's value
   override: boolean; // a live secondGunnerDm crew part fires the gun for a dead gunner
   drives: boolean; // a dead turret drive stops the gun
   outside: boolean; // a hit on an outside part is a pen, also when the shell then stops on the armour
