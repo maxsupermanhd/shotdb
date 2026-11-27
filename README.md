@@ -73,18 +73,22 @@ browsers that have no `showDirectoryPicker`, so Chromium browsers never use it. 
 the pick an upload: its dialog has the title "Select Folder to Upload" and the button
 "Upload", and then it asks "Are you sure you want to upload all files from …?". Nothing
 leaves the computer: the page reads the files in the browser and sends them to no server.
-Cancel in either dialog does nothing. From the files of the folder, the page keeps only the files above. The
-browser cannot remember the folder, so open or drop it on each visit. A datamine tree does
+Cancel in either dialog does nothing. From the files of the folder, the page keeps only the files above. Without
+`showDirectoryPicker` the page cannot keep access to the folder, so open or drop it on each visit.
+The start text names Firefox when the browser is Firefox, and says "this browser" in other
+browsers without the API, for example Safari. A datamine tree does
 not work this way.
 
 In these browsers, a folder without `aces.vromfs.bin` at its top gives an error, and the data
 on the page stays.
 
 Before the first good open, and while no open has given data, the folder controls stand in the
-middle of the page: the buttons above, the status or the error, and in Firefox a note on
-drag-and-drop. Once the page shows game data, the controls go into the **Game folder** part of
+middle of the page: a short text on which folder to pick, the buttons above, and a status line.
+The status line shows only news: a load, an error, the access prompt or a failure to remember the
+folder. Once the page shows game data, the controls go into the **Game folder** part of
 the settings (see [Settings](#settings)). There the page also shows the folder, the source, the
-version and the number of vehicles. In Firefox the button is then **Open another folder**.
+version and the number of vehicles. In Firefox the button is then **Open another folder**, with a
+note on drag-and-drop.
 Drag-and-drop works at all times. When an open fails and the old data stays, the error shows in
 a line under the header, and the cog gets a red mark. **Hide** removes the line and the mark.
 When you pick or drop a folder while the page still reads an older one, the page opens only the

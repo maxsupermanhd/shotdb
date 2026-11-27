@@ -273,7 +273,6 @@ function setupTrees() {
     roundsPanel();
     progress();
   }).observe($(".bar"));
-  $("#progress-text").textContent = "Open a game folder to run the shots";
 }
 
 function render() {
@@ -684,6 +683,8 @@ function fillPicker() {
 }
 
 let saved: FileSystemDirectoryHandle | null = null; // the remembered folder
+// The tooltip of the open button, only in the settings: on the start page the text above the button says it.
+let openTip = "The War Thunder install folder (with aces.vromfs.bin) or an unpacked datamine (with aces.vromfs.bin_u)";
 
 function setupOpen() {
   if (!window.showDirectoryPicker) {
@@ -694,10 +695,9 @@ function setupOpen() {
     input.webkitdirectory = true;
     input.hidden = true;
     document.body.append(input);
-    const open = $("#open");
-    open.title = "The War Thunder install folder (with aces.vromfs.bin). The browser can call this an upload, "
+    openTip = "The War Thunder install folder (with aces.vromfs.bin). The browser can call this an upload, "
       + "but the page reads the files on this computer and sends nothing.";
-    open.addEventListener("click", () => input.click());
+    $("#open").addEventListener("click", () => input.click());
     input.addEventListener("change", async () => {
       const list = [...input.files ?? []];
       input.value = ""; // else the same folder picked again gives no change event
@@ -731,11 +731,11 @@ function setupOpen() {
       }
       await openFiles(seq, files, entry.name);
     });
-    $("#start-text").innerHTML = `Press <b>Open game folder</b> or drop the War Thunder install folder (with aces.vromfs.bin) on this page. `
-      + `The browser can call this an upload, but the files stay on this computer: the page reads them here and sends nothing. `
-      + `This browser cannot remember the folder, so open it again on each visit.`;
-    $("#drop-note").hidden = false;
-    return setStatus("Open or drop the War Thunder install folder. This browser cannot remember the folder.");
+    $("#start-text").textContent = "Pick or drop the install folder (with aces.vromfs.bin) on this page. "
+      + "The browser can call this an upload, but the page reads the files here and sends nothing. "
+      + `${/Firefox\//.test(navigator.userAgent) ? "Firefox" : "This browser"} has no folder picker of the File System Access API `
+      + "(showDirectoryPicker), so the page cannot keep access to the folder. Pick the folder again on each visit.";
+    return;
   }
   $("#open").addEventListener("click", async () => {
     let handle: FileSystemDirectoryHandle;
@@ -760,7 +760,10 @@ function setupOpen() {
     showSaved(false);
     openSource({ kind: "handle", handle: saved }, saved.name);
   });
-  $("#forget").addEventListener("click", () => remember(null));
+  $("#forget").addEventListener("click", () => {
+    if (!$("#reopen").hidden) setStatus(""); // the access prompt is for the forgotten folder
+    remember(null);
+  });
   restore();
 }
 
@@ -828,7 +831,7 @@ async function restore() {
     return;
   }
   showSaved(true);
-  setStatus(`The browser asks again for read access to ${handle.name}`);
+  setStatus("The browser asks for read access again.");
 }
 
 async function remember(handle: FileSystemDirectoryHandle | null) {
@@ -913,7 +916,11 @@ function folderMode() {
   $(shown ? "#folder-slot" : "#start").append($("#folder"));
   $("#start").hidden = !!shown;
   $("#folder-away").hidden = !!shown;
-  if (!window.showDirectoryPicker) $("#open").textContent = shown ? "Open another folder" : "Open game folder";
+  $("#open").title = shown ? openTip : "";
+  if (!window.showDirectoryPicker) {
+    $("#open").textContent = shown ? "Open another folder" : "Open game folder";
+    $("#drop-note").hidden = !shown;
+  }
 }
 
 function name(id: string) {
