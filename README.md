@@ -134,7 +134,8 @@ round. Only the store keeps `each`.
 Before each queue, the page deletes the runs whose newest result is older than 24 hours.
 Then, while there are more than 40 runs or they take more than about 100 MB, it deletes the
 run that it used least recently. A full queue takes about 1.2 MB with one round, and up to
-about 11 MB with 11 rounds.
+about 11 MB with 11 rounds. These sizes are from before the follow-up shots, which make the
+results 12 to 33 % larger (see "Follow-up shots").
 
 The header has two parts. At the left are the brand, the cog, the shooter box, the shooter's
 role and BR, and the progress bar. At the right is the panel of rounds. The panel shows the
@@ -403,6 +404,64 @@ Approximated, and why:
   took damage and the core broke; "pen, no kill" when a module inside took damage;
   "ricochet" when the shell bounced and did nothing inside; else "no pen". Score per view:
   `(kills + 0.4 x (pens + shatters)) / lines`; card score: front 0.5, side 0.3, rear 0.2.
+
+## Follow-up shots
+
+After the first shot on each line, the simulation fires more shots. These shots do not change
+the outcomes, the scores or the colours. The hover and the pinned details show their counts
+in each view. `shotsim` prints them in `follow` of each view, and the round's schedule in
+`followUps`, `followSec` and `thirdSec`.
+
+The shooter's schedule comes from the weapon of the round. Each barrel fires at its
+`timeOffset`, then each `1 / shotFreq` (the best loader; a stock loader is 1.3 times slower).
+After `bulletsCartridge` shots, a barrel waits for the magazine (`reloadTime`). The magazine
+is full at the first shot. The follow-ups are the shots in the 1.5 s after the first shot, and
+at least one: the M4A2 fires one at 5 s, the M42 fires 6, the ZSU-23-4 fires 85. A guided
+round fires no follow-ups, no pairs and no third shot.
+
+1. **Follow-ups.** A first shot that penetrates (pen or shatter), damages crew (hp lost) and
+   does not kill passes the gate. The follow-ups go along the same line, each with its own
+   seed, on the damage state that the shots before left: hp of each part and the dead parts.
+   The armour does not change, and a fire that does not kill does nothing. The chain stops at
+   the kill. `follow.lines` counts the gated lines, `kills` the lines that a follow-up kills,
+   `shots` and `seconds` the sums of the follow-ups and of the time up to each kill.
+2. **Pairs.** In one shot direction, each gated line i takes one shot along each other line j
+   of that direction that alone does not kill. The shot on j has its own seed and goes on the
+   state after i. The order counts: (i, j) and (j, i) are two pairs. `pairs` and `pairKills`
+   count them.
+3. **No return fire.** After a first shot that does not kill, the target cannot fire its main
+   gun when every mount has a dead barrel (unless `brokenBarrelAllowShoot`) or a dead breech,
+   or when a turret drive is dead, or when the gunner is dead and no live crew part has the
+   override (`secondGunnerDm`). A drive that lists many parts stops when all of its parts on
+   the model are dead. The gun stays silent for good, except for a dead gunner with a live
+   substitute: then for the seat change time, `gunnerChangeTime` x `changeTimeMult` x the best
+   skill multiplier (2.4 s). The simulation does not model repairs. `silenced` counts these
+   lines, `third` the lines where the shooter's third shot comes before the window ends, and
+   `thirdKills` those that the second or third shot kills.
+
+The extra shots cost time. These are native times, with 8 goroutines on the 2.61.0.42 install
+and the queue of 1254 targets. The SPAA rows ran on 4 cores at low priority, before and after
+the change under the same limit. "JSON" is the size of all results of the queue, as the store
+keeps them:
+
+| shooter | lines | wall before | wall after | JSON before | JSON after |
+| --- | --- | --- | --- | --- | --- |
+| M4A2 | 40 | 33.8 s | 41.5 s | 4.73 MB | 5.55 MB |
+| M4A2 | 160 | 47.6 s | 95.5 s | 4.89 MB | 6.15 MB |
+| M4A2 | 768 | 127.7 s | 446.5 s | 5.09 MB | 6.76 MB |
+| M42 | 40 | 16.3 s | 23.4 s | 2.88 MB | 3.29 MB |
+| M42 | 160 | 27.5 s | 65.6 s | 2.96 MB | 3.55 MB |
+| M42 | 768 | 61.9 s | 171.3 s | 3.09 MB | 3.86 MB |
+| ZSU-23-4 | 160 | 38.3 s | 119.5 s | 3.75 MB | 4.28 MB |
+| M163 | 160 | 35.1 s | 76.3 s | 3.75 MB | 4.22 MB |
+
+The pairs cost the most at many lines: a direction with n lines gives up to n(n-1) pairs. The
+85 follow-ups of the ZSU-23-4 stop at the kill, so the cost does not grow as much as the
+follow-ups. The simulation sets no cap on the follow-ups.
+
+The details show these counts under the plates of each view. They show the third shot only for
+a round with follow-ups. A dead drive stops only the aim, so a gun that already points at the
+shooter can still fire. The simulation does not model this limit.
 
 ## Workers
 

@@ -306,42 +306,104 @@ func (d *Data) crewAndRacks(t tree, v *dm.Vehicle) {
 }
 
 func (d *Data) shells(t tree, v *dm.Vehicle) error {
+	var list []tree
+	for _, cw := range blocks(t, "commonWeapons") {
+		list = append(list, blocks(cw, "Weapon")...)
+	}
 	seen := map[string]bool{}
 	first := true
-	for _, cw := range blocks(t, "commonWeapons") {
-		for _, w := range blocks(cw, "Weapon") {
-			path := str(w, "blk")
-			if path == "" || strings.HasSuffix(path, "dummy_weapon.blk") {
+	var main tree
+	var gunMounts []tree
+	for _, w := range list {
+		path := str(w, "blk")
+		if path == "" || strings.HasSuffix(path, "dummy_weapon.blk") {
+			continue
+		}
+		wp, err := d.weapon(path)
+		if err != nil {
+			return fmt.Errorf("%s: %w", v.ID, err)
+		}
+		// The barrels of the weapon: its entries with the same file and trigger.
+		var mounts []tree
+		for _, o := range list {
+			if str(o, "blk") == path && str(o, "trigger") == str(w, "trigger") {
+				mounts = append(mounts, o)
+			}
+		}
+		for _, s := range wp.shells {
+			if first {
+				v.RackExplosive = s.ExplMass > 0
+				first = false
+			}
+			key := s.Name + "/" + s.Type
+			// Rounds of these types do not attack armour.
+			noArmour := slices.ContainsFunc([]string{"smoke", "sam", "aam", "football", "napalm", "sonic", "snowball", "practice"}, func(p string) bool { return strings.HasPrefix(s.Type, p) })
+			// 0.0199: a 20 mm calibre reads as 0.0199999 from the float32 files.
+			if s.Caliber < 0.0199 || seen[key] || s.Type == "" || noArmour {
 				continue
 			}
-			wp, err := d.weapon(path)
-			if err != nil {
-				return fmt.Errorf("%s: %w", v.ID, err)
+			seen[key] = true
+			s.Gun = wp.gun
+			s.ShotFreq = numOr(w, "shotFreq", wp.shotFreq)
+			s.Cartridge = wp.cartridge
+			s.MagReload = numOr(w, "reloadTime", wp.reload)
+			for _, m := range mounts {
+				s.Barrels = append(s.Barrels, numOr(m, "timeOffset", 0))
 			}
-			for _, s := range wp.shells {
-				if first {
-					v.RackExplosive = s.ExplMass > 0
-					first = false
+			if main == nil {
+				main, gunMounts = w, mounts
+			}
+			v.Shells = append(v.Shells, s)
+		}
+	}
+	if main == nil {
+		return nil
+	}
+	w := main
+	turret, _ := w["turret"].(tree)
+	g := &dm.Gun{
+		BrokenBarrelShoots: w["brokenBarrelAllowShoot"] == true,
+		HorDrive:           trimDm(strs(turret, "horDriveDm")),
+		VerDrive:           trimDm(strs(turret, "verDriveDm")),
+		Gunner:             strings.TrimSuffix(str(turret, "gunnerDm"), "_dm"),
+		Override:           strings.TrimSuffix(str(turret, "secondGunnerDm"), "_dm"),
+		ChangeMult:         1,
+	}
+	for _, m := range gunMounts {
+		g.Barrels = append(g.Barrels, strings.TrimSuffix(str(m, "barrelDP"), "_dm"))
+		g.Breeches = append(g.Breeches, strings.TrimSuffix(str(m, "breechDP"), "_dm"))
+	}
+	if crew, ok := t["tank_crew"].(tree); ok {
+		g.ChangeMult = numOr(crew, "changeTimeMult", 1)
+		for _, k := range sortedKeys(crew) {
+			m, ok := crew[k].(tree)
+			if !ok || strings.TrimSuffix(str(m, "dmPart"), "_dm") != g.Gunner {
+				continue
+			}
+			for _, sub := range strs(m, "substitute") {
+				if sm, ok := crew[sub].(tree); ok {
+					g.Substitutes = append(g.Substitutes, strings.TrimSuffix(str(sm, "dmPart"), "_dm"))
 				}
-				key := s.Name + "/" + s.Type
-				// Rounds of these types do not attack armour.
-				noArmour := slices.ContainsFunc([]string{"smoke", "sam", "aam", "football", "napalm", "sonic", "snowball", "practice"}, func(p string) bool { return strings.HasPrefix(s.Type, p) })
-				// 0.0199: a 20 mm calibre reads as 0.0199999 from the float32 files.
-				if s.Caliber < 0.0199 || seen[key] || s.Type == "" || noArmour {
-					continue
-				}
-				seen[key] = true
-				s.Gun = wp.gun
-				v.Shells = append(v.Shells, s)
 			}
 		}
 	}
+	v.Gun = g
 	return nil
 }
 
+func trimDm(names []string) []string {
+	for i, n := range names {
+		names[i] = strings.TrimSuffix(n, "_dm")
+	}
+	return names
+}
+
 type weapon struct {
-	gun    string
-	shells []dm.Shell // all rounds of the weapon file, in file order
+	gun       string
+	shells    []dm.Shell // all rounds of the weapon file, in file order
+	shotFreq  float64
+	cartridge int
+	reload    float64
 }
 
 // weapon gives the gun name and the rounds of a weapon file, once. Most
@@ -355,7 +417,7 @@ func (d *Data) weapon(path string) (weapon, error) {
 		return weapon{}, err
 	}
 	base := strings.TrimSuffix(path[strings.LastIndex(path, "/")+1:], ".blk")
-	wp := weapon{gun: d.names["weapons/"+base]}
+	wp := weapon{gun: d.names["weapons/"+base], shotFreq: numOr(wt, "shotFreq", 0), cartridge: int(numOr(wt, "bulletsCartridge", 1)), reload: numOr(wt, "reloadTime", 0)}
 	if wp.gun == "" {
 		wp.gun = base
 	}
@@ -436,6 +498,7 @@ func (d *Data) shell(b tree) (dm.Shell, error) {
 		Mass:           numOr(b, "mass", 0),
 		Cx:             numOr(b, "Cx", 0),
 		Rocket:         b["rocket"] == true,
+		Guided:         slices.ContainsFunc([]string{"guidance", "guidanceType", "operated", "operatedDist"}, func(k string) bool { _, ok := b[k]; return ok }),
 		ExplType:       str(b, "explosiveType"),
 		ExplMass:       numOr(b, "explosiveMass", 0),
 		ExplThresh:     numOr(b, "explodeTreshold", 0),

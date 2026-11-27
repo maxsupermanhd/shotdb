@@ -1,6 +1,7 @@
 package sim
 
 import (
+	"maps"
 	"math"
 	"slices"
 	"strings"
@@ -14,15 +15,81 @@ type fate struct {
 	interior  bool // a module inside the vehicle took damage
 }
 
+// damage is the state of the target's parts between shots. A part not in hp has its full hp.
+type damage struct {
+	hp   map[int32]float64
+	dead map[int32]bool
+}
+
+func newDamage() damage { return damage{hp: map[int32]float64{}, dead: map[int32]bool{}} }
+
+func (d damage) clone() damage { return damage{hp: maps.Clone(d.hp), dead: maps.Clone(d.dead)} }
+
+// crewHit tells whether a crew part lost hp or died.
+func (t *target) crewHit(d damage) bool {
+	for _, i := range t.crew {
+		if h, ok := d.hp[i]; d.dead[i] || ok && h < t.parts[i].HP {
+			return true
+		}
+	}
+	return false
+}
+
+// silenced tells whether the target cannot fire its main gun back, and for how
+// long in seconds: +Inf when no crew member can fix it. A broken barrel or
+// breech on every mount, or a dead turret drive, stops the gun. A dead gunner
+// stops it when no live crew part has the override, until a substitute takes the seat.
+func (t *target) silenced(d damage, tables *dm.Tables) (bool, float64) {
+	g := t.v.Gun
+	if g == nil {
+		return false, 0
+	}
+	dead := func(name string) bool {
+		i := t.index(name)
+		return i >= 0 && d.dead[i]
+	}
+	// A drive with many parts stops when each of its parts on the model is dead.
+	drive := func(names []string) bool {
+		on := 0
+		for _, n := range names {
+			if t.index(n) < 0 {
+				continue
+			}
+			if !dead(n) {
+				return false
+			}
+			on++
+		}
+		return on > 0
+	}
+	out := len(g.Barrels) > 0
+	for k := range g.Barrels {
+		if !(dead(g.Barrels[k]) && !g.BrokenBarrelShoots || dead(g.Breeches[k])) {
+			out = false
+		}
+	}
+	if out || drive(g.HorDrive) || drive(g.VerDrive) {
+		return true, math.Inf(1)
+	}
+	if g.Gunner == "" || !dead(g.Gunner) || g.Override != "" && t.index(g.Override) >= 0 && !dead(g.Override) {
+		return false, 0
+	}
+	for _, sub := range g.Substitutes {
+		if t.index(sub) >= 0 && !dead(sub) {
+			return true, tables.SeatChange * g.ChangeMult
+		}
+	}
+	return true, math.Inf(1)
+}
+
 // resolve applies the shot's damage messages in order: hp, the onHit rule
 // (the highest damage value below the hit, of a matching type), the onKill
 // rule when a part dies, then the kill conditions: an ammo explosion or fatal
 // ammo fire, a fuel explosion, too few crew alive.
-func (s *shot) resolve() fate {
+func (s *shot) resolve(d damage) fate {
 	var f fate
 	t := s.t
-	hp := map[int32]float64{}
-	dead := map[int32]bool{}
+	hp, dead := d.hp, d.dead
 	state := func(i int32) float64 {
 		if h, ok := hp[i]; ok {
 			return h

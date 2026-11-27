@@ -78,6 +78,7 @@ type Globals struct {
 	Integrity            Map4    // explosive grams -> chance the body breaks at its burst
 	EnergyToDamage       []Point // kinetic energy J -> damage
 	RicochetPenKept      []Point // cos -> share of penetration kept after a ricochet
+	SeatChange           float64 // s for a crew member to take the gunner's seat, with the best crew skill
 
 	Spall    map[string]*SpallPreset
 	Strength map[string]float64 // explosive type -> strengthEquivalent (TNT for splash and pressure)

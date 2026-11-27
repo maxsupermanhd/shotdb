@@ -18,10 +18,12 @@ type span struct {
 	cos     float64
 }
 
-// sample is one shot line: from o along d, with the parts it crosses.
+// sample is one shot line: from o along d, with the parts it crosses. dir
+// numbers the shot direction of the line in its view.
 type sample struct {
 	o, d  vec
 	spans []span
+	dir   int
 }
 
 // target is what the simulation keeps of a vehicle: its mesh, parts and shot lines.
@@ -165,8 +167,10 @@ func (t *target) lines(bearings, elevations []float64, perDir int) []sample {
 	var buf []geom.Hit
 	mid := geom.Scale(geom.Add(t.mesh.Min, t.mesh.Max), 0.5)
 	radius := 0.5*geom.Norm(geom.Sub(t.mesh.Max, t.mesh.Min)) + 1
+	dir := 0
 	for _, b := range bearings {
 		for _, e := range elevations {
+			dir++
 			br, er := b*math.Pi/180, e*math.Pi/180
 			// The shooter sits at this bearing from the nose (+x), toward +z for a positive one.
 			from := vec{math.Cos(br) * math.Cos(er), math.Sin(er), math.Sin(br) * math.Cos(er)}
@@ -193,7 +197,7 @@ func (t *target) lines(bearings, elevations []float64, perDir int) []sample {
 					o := geom.Add(geom.Add(mid, geom.Scale(from, radius)), geom.Add(geom.Scale(u, a), geom.Scale(w, c)))
 					sp := t.spans(o, d, 2*radius, &buf, nil)
 					if len(sp) > 0 {
-						hit = append(hit, sample{o: o, d: d, spans: sp})
+						hit = append(hit, sample{o: o, d: d, spans: sp, dir: dir})
 					}
 				}
 			}

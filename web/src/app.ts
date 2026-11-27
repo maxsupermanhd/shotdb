@@ -2,7 +2,7 @@
 // The manager worker (manager.wasm) reads the game files and runs the queue. It hands the targets to a pool of compute
 // workers (compute.wasm) over MessagePorts. The page only draws and passes the user's actions to the manager.
 import * as store from "./store";
-import type { Card, Choice, ComputeFatal, FromManager, GameInfo, Grid, Outcome, Plate, Progress, Rounds, Shell, SimResult, Source, TargetResult, ToManager, Tree, Unit } from "./types";
+import type { Card, Choice, ComputeFatal, Follow, FromManager, GameInfo, Grid, Outcome, Plate, Progress, Rounds, Shell, SimResult, Source, TargetResult, ToManager, Tree, Unit } from "./types";
 
 const RANKS = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"];
 const OUTCOMES: Outcome[] = ["kill", "pen", "shatter", "ricochet", "nonpen"];
@@ -1114,7 +1114,7 @@ async function stored(c: Choice, rounds?: Shell[]) {
     const all: SimResult = JSON.parse(s);
     const r = all.each?.[c.round];
     if (!r || all.each!.length !== (rounds?.length ?? all.each!.length)) continue;
-    out.set(target, { shooter: all.shooter, target, shell: rounds?.[c.round] ?? null, views: r.views, score: r.score, ms: r.ms, shots: r.shots });
+    out.set(target, { shooter: all.shooter, target, shell: rounds?.[c.round] ?? null, views: r.views, score: r.score, ms: r.ms, shots: r.shots, extra: r.extra });
   }
   return out;
 }
@@ -1280,6 +1280,21 @@ function plateText(p: Plate) {
   return `${esc(p.name.replaceAll("_", " "))} ${Math.round(p.mm)} mm <span class="muted">(${p.shots})</span>`;
 }
 
+function followText(f: Follow | undefined, sh: Shell) {
+  if (!f) return "";
+  const out = [];
+  if (f.lines) {
+    const k = f.kills ?? 0;
+    out.push(`Follow-ups kill ${k} of ${f.lines} crew hits${k ? ` <span class="muted">(mean ${(f.shots! / k).toFixed(1)} shots, ${(f.seconds! / k).toFixed(2)} s)</span>` : ""}`);
+  }
+  if (f.pairs) out.push(`two lines kill in ${f.pairKills ?? 0} of ${f.pairs} pairs`);
+  if (f.silenced) {
+    out.push(`no return fire after ${f.silenced}`
+      + (sh.followUps ? `: third shot at ${sh.thirdSec} s on ${f.third ?? 0}, kill in 3 shots on ${f.thirdKills ?? 0}` : ""));
+  }
+  return out.length ? `<div class="tt-follow">${out.join(" · ")}</div>` : "";
+}
+
 function showTooltip(el: HTMLElement, pinned = false) {
   const tip = $("#tooltip");
   const id = el.dataset.id!;
@@ -1303,16 +1318,17 @@ function showTooltip(el: HTMLElement, pinned = false) {
   } else {
     const n = state.rounds?.rounds.length ?? 0;
     body = `<div class="tt-shell">${esc(res.shell.name)} <span class="muted">${shellType(res.shell.type)} · ${res.shell.pen} mm flat at ${state.rounds?.range ?? 500} m</span></div>`
-      + `<div class="tt-sub">${esc(res.shell.gun)} · ${state.round >= 0 ? "the only round fired" : `best of ${n} round${n === 1 ? "" : "s"}`} · ${state.lines} lines a round</div>`
+      + `<div class="tt-sub">${esc(res.shell.gun)} · ${state.round >= 0 ? "the only round fired" : `best of ${n} round${n === 1 ? "" : "s"}`} · ${state.lines} lines a round${res.shell.followUps ? ` · ${res.shell.followUps} follow-up${res.shell.followUps === 1 ? "" : "s"} by ${res.shell.followSec} s` : " · no follow-ups"}</div>`
       + res.views.map((v) => {
         const total = OUTCOMES.reduce((a, o) => a + (v.counts[o] ?? 0), 0);
         const bar = OUTCOMES.map((o) => v.counts[o] ? `<i class="o-${o}" style="flex:${v.counts[o]}"></i>` : "").join("");
         const parts = OUTCOMES.filter((o) => v.counts[o]).map((o) => `<span class="c-${o}">${v.counts[o]} ${OUTCOME_LABEL[o].toLowerCase()}</span>`).join(", ");
         return `<div class="tt-view"><span class="tt-vname">${v.name}</span><span class="tt-bar">${bar}</span></div>`
           + `<div class="tt-parts">${parts} <span class="muted">of ${total}</span></div>`
-          + `<div class="tt-plates">${v.plates.map(plateText).join(" · ")}</div>`;
+          + `<div class="tt-plates">${v.plates.map(plateText).join(" · ")}</div>`
+          + followText(v.follow, res.shell!);
       }).join("")
-      + `<div class="tt-score">Lethality <b>${Math.round(res.score * 100)}%</b> <span class="muted">(${res.shots} shots on the collision model, ${state.kept.has(id) ? "kept from an earlier run" : `${res.ms} ms`}; plates: first armour met, mean thickness, shots)</span></div>`;
+      + `<div class="tt-score">Lethality <b>${Math.round(res.score * 100)}%</b> <span class="muted">(${res.shots} shots on the collision model${res.extra ? ` and ${res.extra} follow-up and pair shots` : ""}, ${state.kept.has(id) ? "kept from an earlier run" : `${res.ms} ms`}; plates: first armour met, mean thickness, shots)</span></div>`;
   }
   const sbr = br(state.shooter);
   const d = shootable(id) && state.shooter ? br(id) - sbr : 0;

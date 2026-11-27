@@ -53,6 +53,20 @@ export interface View {
   counts: Partial<Record<Outcome, number>>;
   score: number;
   plates: Plate[];
+  follow?: Follow;
+}
+
+// The shots after the first in a view. A zero count is left out.
+export interface Follow {
+  lines?: number; // first shots that penetrate, damage crew and do not kill
+  kills?: number; // of those, lines that a follow-up kills
+  shots?: number; // sum over the kills of the follow-ups fired
+  seconds?: number; // sum over the kills of the time to the kill
+  pairs?: number; // two-shot combinations in one direction
+  pairKills?: number;
+  silenced?: number; // first shots after which the target cannot fire back
+  third?: number; // of those, lines with a third shot before the target fires
+  thirdKills?: number; // of those, lines killed by the second or third shot
 }
 
 // A round of the shooter; index is its place in Rounds.rounds.
@@ -67,6 +81,9 @@ export interface Shell {
   pen: number; // mm flat at the range
   filler: number; // kg, 0 if none
   explosive: string;
+  followUps?: number; // shots after the first in 1.5 s, at least 1; none for a guided round
+  followSec?: number; // time of the last follow-up, s
+  thirdSec?: number; // time of the third shot, s
 }
 
 export interface Rounds {
@@ -82,6 +99,7 @@ export interface SimResult {
   score: number;
   ms: number;
   shots: number;
+  extra?: number; // follow-up and pair shots
   each?: RoundResult[]; // when all rounds are fired: the result of each round, by its index
 }
 
@@ -91,6 +109,7 @@ export interface RoundResult {
   score: number;
   ms: number;
   shots: number;
+  extra?: number;
 }
 
 export interface SimError {

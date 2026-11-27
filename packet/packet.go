@@ -70,7 +70,7 @@ func Target(v *dm.Vehicle) ([]byte, error) {
 	t := target{
 		Vehicle: &dm.Vehicle{
 			Unit: v.Unit, Model: v.Model, Parts: map[string]*dm.Part{}, Crew: v.Crew, MinCrew: v.MinCrew,
-			Racks: v.Racks, RackExplosive: v.RackExplosive, Pressure: v.Pressure, Open: v.Open, Hidden: v.Hidden,
+			Racks: v.Racks, RackExplosive: v.RackExplosive, Pressure: v.Pressure, Open: v.Open, Hidden: v.Hidden, Gun: v.Gun,
 		},
 		OnHit: map[string]int{}, OnKill: map[string]int{},
 	}

@@ -25,6 +25,9 @@ type shell struct {
 	speed float64 // at the target
 	pen   float64 // flat penetration of the body (or the jet)
 	body  float64 // flat penetration of the kinetic body
+	// Times of the next shots on a line, and how many of them are follow-ups. See followTimes.
+	times   []float64
+	follows int
 }
 
 // message is one damage message to a part.

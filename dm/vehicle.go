@@ -39,6 +39,19 @@ type Vehicle struct {
 	Pressure, Open []string
 
 	Hidden map[string]bool // collision nodes not on the stock vehicle
+
+	Gun *Gun // the main gun, nil if none
+}
+
+// Gun is what the target needs to fire its main gun back: the parts that stop it.
+type Gun struct {
+	Barrels, Breeches  []string // by mount: barrelDP and breechDP
+	BrokenBarrelShoots bool     // brokenBarrelAllowShoot
+	HorDrive, VerDrive []string // horDriveDm and verDriveDm
+	Gunner             string   // gunnerDm
+	Override           string   // secondGunnerDm: a second crew part that can fire the gun
+	Substitutes        []string // crew parts that can take the gunner's seat
+	ChangeMult         float64  // tank_crew.changeTimeMult
 }
 
 // DamageNodes keeps the collision nodes that are damage parts of the stock
@@ -165,6 +178,13 @@ type Shell struct {
 	Speed   float64 // m/s at the muzzle
 	Cx      float64
 	Rocket  bool
+	Guided  bool
+
+	// Fire rate of the weapon that fires the round.
+	ShotFreq  float64   // shots/s of one barrel, with the best loader
+	Barrels   []float64 // timeOffset of each barrel, s
+	Cartridge int       // bulletsCartridge: shots of one barrel between magazine reloads
+	MagReload float64   // reloadTime of the magazine, s
 
 	DeMarre     *DeMarre
 	LanzOd      *LanzOdermatt

@@ -131,7 +131,7 @@ func Open(files Files) (*Data, error) {
 			return nil, err
 		}
 		d.unmount("lang")
-		if err := d.mount("aces", []string{"config/damagemodel.blk", "gamedata/damage_model/", "gamedata/units/tankmodels/", "gamedata/weapons/"}); err != nil {
+		if err := d.mount("aces", []string{"config/damagemodel.blk", "config/gameparams.blk", "gamedata/damage_model/", "gamedata/units/tankmodels/", "gamedata/weapons/"}); err != nil {
 			return nil, err
 		}
 		if err := d.mount("char", nil); err != nil {
@@ -381,6 +381,26 @@ func (d *Data) loadTables() error {
 			d.Classes[name], d.mults[name] = c, damageMults(c)
 		}
 	}
+
+	gp, err := d.blk("aces", "config/gameparams.blk")
+	if err != nil {
+		return err
+	}
+	rank, err := d.blk("char", "config/rank.blk")
+	if err != nil {
+		return err
+	}
+	// changeTimeMultiplier is [lowest skill, highest skill].
+	cp, _ := rank["crew_parameters"].(tree)
+	tc, _ := cp["tank_crew"].(tree)
+	tg, _ := tc["tank_gunner"].(tree)
+	mult := 1.0
+	if m, ok := tg["changeTimeMultiplier"].([]any); ok {
+		if p, ok := vec2(m); ok {
+			mult = p.Y
+		}
+	}
+	d.SeatChange = numOr(gp, "gunnerChangeTime", 3) * mult
 
 	expl, err := d.blk("aces", "gamedata/damage_model/explosive.blk")
 	if err != nil {

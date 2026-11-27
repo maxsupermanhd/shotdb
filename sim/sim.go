@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand/v2"
+	"slices"
 	"sort"
 	"time"
 
@@ -43,8 +44,9 @@ type Result struct {
 	Shell   *ShellInfo   `json:"shell"` // nil when the shooter has no usable gun
 	Views   []ViewResult `json:"views"`
 	Score   float64      `json:"score"`
-	Ms      float64      `json:"ms"`    // time spent, all shells
-	Shots   int          `json:"shots"` // shots simulated, all shells
+	Ms      float64      `json:"ms"`              // time spent, all shells
+	Shots   int          `json:"shots"`           // shots simulated, all shells
+	Extra   int          `json:"extra,omitempty"` // follow-up and pair shots simulated, all shells
 	// With round -1: the result of each round, by its index. The page keeps
 	// them to show a single round later without a new simulation.
 	Each []RoundResult `json:"each,omitempty"`
@@ -57,6 +59,7 @@ type RoundResult struct {
 	Score float64      `json:"score"`
 	Ms    float64      `json:"ms"`
 	Shots int          `json:"shots"`
+	Extra int          `json:"extra,omitempty"`
 }
 
 // ShellInfo is a round of the shooter. Index is its place in Rounds.
@@ -71,6 +74,11 @@ type ShellInfo struct {
 	PenMm     float64 `json:"pen"`   // flat penetration at Range
 	FillerKg  float64 `json:"filler"`
 	Explosive string  `json:"explosive"`
+	// Follow-up shots after the first on the same line: their count and the
+	// time of the last one, and the time of the third shot. Zero for a guided round.
+	FollowUps int     `json:"followUps,omitempty"`
+	FollowSec float64 `json:"followSec,omitempty"`
+	ThirdSec  float64 `json:"thirdSec,omitempty"`
 }
 
 type ViewResult struct {
@@ -78,6 +86,22 @@ type ViewResult struct {
 	Counts map[Outcome]int `json:"counts"`
 	Score  float64         `json:"score"`
 	Plates []PlateInfo     `json:"plates"` // the armour parts met first most often
+	Follow *Follow         `json:"follow,omitempty"`
+}
+
+// Follow counts the shots after the first in a view. See README.md, "Follow-up shots".
+type Follow struct {
+	Lines   int     `json:"lines,omitempty"`   // first shots that penetrate, damage crew and do not kill
+	Kills   int     `json:"kills,omitempty"`   // of those, lines that a follow-up kills
+	Shots   int     `json:"shots,omitempty"`   // sum over the kills of the follow-ups fired
+	Seconds float64 `json:"seconds,omitempty"` // sum over the kills of the time to the kill
+
+	Pairs     int `json:"pairs,omitempty"`     // two-shot combinations in one direction
+	PairKills int `json:"pairKills,omitempty"` // of those, combinations that kill
+
+	Silenced   int `json:"silenced,omitempty"`   // first shots after which the target cannot fire back
+	Third      int `json:"third,omitempty"`      // of those, lines with a third shot before the target fires
+	ThirdKills int `json:"thirdKills,omitempty"` // of those, lines killed by the second or third shot
 }
 
 // PlateInfo is an armour part the shell met first: in how many of the view's
@@ -99,6 +123,7 @@ func Rounds(d *dm.Tables, a *dm.Vehicle) []ShellInfo {
 
 func newShell(d *dm.Tables, g *dm.Shell) *shell {
 	sh := &shell{Shell: g, speed: impactSpeed(g, Range)}
+	sh.times, sh.follows = followTimes(g)
 	sh.body = kineticPen(d, g, sh.speed, Range)
 	sh.pen = sh.body
 	if g.Cumulative > 0 {
@@ -109,11 +134,56 @@ func newShell(d *dm.Tables, g *dm.Shell) *shell {
 
 func (sh *shell) info(index int) ShellInfo {
 	g := sh.Shell
-	return ShellInfo{
+	in := ShellInfo{
 		Index: index, Name: g.Label, Gun: g.Gun, Type: g.Type,
 		CaliberMm: math.Round(g.Caliber*10000) / 10, MassKg: math.Round(g.Mass*1000) / 1000, Speed: math.Round(g.Speed),
 		PenMm: math.Round(sh.pen*10) / 10, FillerKg: math.Round(g.ExplMass*10000) / 10000, Explosive: g.ExplType,
 	}
+	if n := sh.follows; n > 0 {
+		in.FollowUps, in.FollowSec, in.ThirdSec = n, math.Round(sh.times[n-1]*1000)/1000, math.Round(sh.times[1]*1000)/1000
+	}
+	return in
+}
+
+// FollowWindow is the time after the first shot in which the follow-ups fall, s.
+const FollowWindow = 1.5
+
+// followTimes gives the times after the first shot of the next shots on the
+// same line, with the best loader, and how many of them are follow-ups: the
+// shots in FollowWindow, at least 1. It gives at least two times. Each barrel
+// fires at its offset, then each 1/ShotFreq; after Cartridge shots it waits
+// for the magazine. The magazine is full at the first shot.
+func followTimes(g *dm.Shell) ([]float64, int) {
+	if g.ShotFreq <= 0 || g.Guided {
+		return nil, 0
+	}
+	gap := 1 / g.ShotFreq
+	offsets := g.Barrels
+	if len(offsets) == 0 {
+		offsets = []float64{0}
+	}
+	base := slices.Min(offsets)
+	var times []float64
+	for _, o := range offsets {
+		at := o - base
+		for k := 0; k < 3 || at <= FollowWindow; k++ {
+			if k > 0 {
+				at += gap
+				if g.Cartridge > 1 && k%g.Cartridge == 0 {
+					at += math.Max(gap, g.MagReload) - gap
+				}
+			}
+			times = append(times, at)
+		}
+	}
+	slices.Sort(times)
+	times = times[1:]
+	n := 0
+	for n < len(times) && times[n] <= FollowWindow {
+		n++
+	}
+	n = max(n, 1)
+	return times[:max(n, 2)], n
 }
 
 // Simulate fires the shooter a at the target v, on the target's collision
@@ -131,7 +201,7 @@ func Simulate(d *dm.Tables, a, v *dm.Vehicle, nodes []geom.Node, round int, s Sa
 	t := newTarget(v, nodes, s)
 	best := Result{}
 	bestPen := -1.0
-	shots := 0
+	shots, extra := 0, 0
 	var each []RoundResult
 	for k := range a.Shells {
 		if round >= 0 && k != round {
@@ -140,14 +210,15 @@ func Simulate(d *dm.Tables, a, v *dm.Vehicle, nodes []geom.Node, round int, s Sa
 		at := time.Now()
 		r := shoot(d, k, &a.Shells[k], t)
 		shots += r.Shots
+		extra += r.Extra
 		if round < 0 {
-			each = append(each, RoundResult{Views: r.Views, Score: r.Score, Shots: r.Shots, Ms: math.Round(float64(time.Since(at).Microseconds())/100) / 10})
+			each = append(each, RoundResult{Views: r.Views, Score: r.Score, Shots: r.Shots, Extra: r.Extra, Ms: math.Round(float64(time.Since(at).Microseconds())/100) / 10})
 		}
 		if best.Shell == nil || r.Score > best.Score || (r.Score == best.Score && r.Shell.PenMm > bestPen) {
 			best, bestPen = r, r.Shell.PenMm
 		}
 	}
-	best.Shooter, best.Target, best.Shots, best.Each = a.ID, v.ID, shots, each
+	best.Shooter, best.Target, best.Shots, best.Extra, best.Each = a.ID, v.ID, shots, extra, each
 	if best.Shell == nil {
 		for _, view := range Views {
 			best.Views = append(best.Views, ViewResult{Name: view.Name, Counts: map[Outcome]int{}})
@@ -172,13 +243,63 @@ func shoot(d *dm.Tables, index int, g *dm.Shell, t *target) Result {
 	r := Result{Shell: &info}
 	for vi, view := range Views {
 		vr := ViewResult{Name: view.Name, Counts: map[Outcome]int{}}
+		var fl Follow
 		first := map[int32]*PlateInfo{}
 		lines := t.views[vi]
+		alone := make([]bool, len(lines))   // the first shot kills
+		after := make([]damage, len(lines)) // the state after a first shot that passes the gate
+		// next fires one more shot along line l on the state dmg and tells whether it kills.
+		next := func(l sample, stream uint64, dmg damage) bool {
+			x := &shot{d: d, t: t, sh: sh, rng: rand.New(rand.NewPCG(seed, stream)), hits: hits, leaf: leaf}
+			x.run(l)
+			hits, leaf = x.hits, x.leaf
+			r.Extra++
+			return x.resolve(dmg).destroyed
+		}
 		for li, l := range lines {
 			x := &shot{d: d, t: t, sh: sh, rng: rand.New(rand.NewPCG(seed, uint64(vi<<16|li))), hits: hits, leaf: leaf}
 			x.run(l)
 			hits, leaf = x.hits, x.leaf
-			f := x.resolve()
+			dmg := newDamage()
+			f := x.resolve(dmg)
+			alone[li] = f.destroyed
+			if !f.destroyed {
+				gated := sh.follows > 0 && f.interior && t.crewHit(dmg)
+				silenced, window := t.silenced(dmg, d)
+				third := silenced && sh.follows > 0 && sh.times[1] < window
+				need := 0
+				if gated {
+					need = sh.follows
+					after[li] = dmg.clone()
+				}
+				if third {
+					need = max(need, 2)
+				}
+				kill := 0
+				for k := 1; k <= need; k++ {
+					if next(l, uint64(k)<<32|uint64(vi<<16|li), dmg) {
+						kill = k
+						break
+					}
+				}
+				if gated {
+					fl.Lines++
+					if kill > 0 && kill <= sh.follows {
+						fl.Kills++
+						fl.Shots += kill
+						fl.Seconds += sh.times[kill-1]
+					}
+				}
+				if silenced {
+					fl.Silenced++
+				}
+				if third {
+					fl.Third++
+					if kill > 0 && kill <= 2 {
+						fl.ThirdKills++
+					}
+				}
+			}
 			var o Outcome
 			switch {
 			case f.destroyed:
@@ -203,6 +324,25 @@ func shoot(d *dm.Tables, index int, g *dm.Shell, t *target) Result {
 				p.Shots++
 				p.Mm += x.firstCharge
 			}
+		}
+		// Pairs: the first shot of line i, then a shot along another line j of the same direction that alone does not kill.
+		for i := range lines {
+			if after[i].hp == nil {
+				continue
+			}
+			for j := range lines {
+				if j == i || lines[j].dir != lines[i].dir || alone[j] {
+					continue
+				}
+				fl.Pairs++
+				if next(lines[j], 1<<63|uint64(j)<<32|uint64(vi<<16|i), after[i].clone()) {
+					fl.PairKills++
+				}
+			}
+		}
+		if fl != (Follow{}) {
+			fl.Seconds = math.Round(fl.Seconds*1000) / 1000
+			vr.Follow = &fl
 		}
 		for _, p := range first {
 			p.Mm = math.Round(p.Mm / float64(p.Shots))

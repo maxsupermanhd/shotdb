@@ -329,6 +329,7 @@ body {
 .tt-vname { width: 38px; color: var(--muted); font-size: 12px; text-transform: capitalize; }
 .tt-bar { flex: 1; display: flex; height: 10px; border-radius: 2px; overflow: hidden; gap: 1px; }
 .tt-parts { margin: 2px 0 0 46px; font-size: 11px; color: var(--muted); }
+.tt-follow { margin: 2px 0 0 46px; font-size: 11px; }
 .tt-shell { font-size: 12px; margin-bottom: 4px; }
 .tt-plates { margin: 1px 0 0 46px; font-size: 10.5px; color: #6f7a88; }
 .tt-score { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); }
